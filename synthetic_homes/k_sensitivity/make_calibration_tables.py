@@ -26,6 +26,7 @@ LEVEL_FILE = (
 
 OUTPUT_DIR = (
     SCRIPT_DIR
+    / "tables"
 )
 
 
@@ -43,22 +44,20 @@ K_VALUES = (
 
 def evenly_spaced_level_indices(k, max_k):
     """
-    Match generate_calibration_grid.py exactly.
+    Return k approximately evenly spaced one-based levels from 1..max_k.
     """
 
-    indices = tuple(
+    return tuple(
         int(
             round(
-                1
-                + i
+                i
                 * (max_k - 1)
                 / (k - 1)
             )
         )
+        + 1
         for i in range(k)
     )
-
-    return indices
 
 
 def write_selection_table(levels, output):
