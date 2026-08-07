@@ -210,43 +210,56 @@ def _format_duration(
 
 class TerminalProgressBar:
     """
-    Lightweight dependency-free terminal progress bar.
+    Dependency-free progress bar fixed to the bottom row of the terminal.
 
-    In an interactive terminal, the bar is continuously redrawn on the current
-    bottom line. Messages are printed above it and the bar is then redrawn.
+    In an interactive ANSI-compatible terminal, the final terminal row is
+    reserved for the progress bar. Messages scroll in the region above it.
 
-    When stdout is not a TTY, periodic plain-text progress lines are emitted
-    instead so redirected logs remain readable.
+    If stdout is redirected to a file or otherwise is not a TTY, periodic
+    ordinary progress lines are emitted instead.
     """
 
     def __init__(
         self,
         total: int,
         description: str = "Calibration grid",
+        initial: int = 0,
     ) -> None:
         self.total = max(
             0,
             int(total),
         )
 
-        self.description = (
-            description
+        self.description = description
+
+        self.completed = max(
+            0,
+            min(
+                int(initial),
+                self.total,
+            ),
         )
 
-        self.completed = 0
-        self.successful = 0
+        self._initial_completed = (
+            self.completed
+        )
+
+        self.successful = (
+            self.completed
+        )
+
         self.failed = 0
 
-        self.started = (
-            time.perf_counter()
-        )
+        self.started = time.perf_counter()
 
         self.is_tty = (
             sys.stdout.isatty()
         )
 
-        # For redirected output, report approximately every 1% rather than
-        # emitting tens of thousands of lines.
+        self.rows = 0
+        self.columns = 0
+
+        # For redirected output, emit roughly one line per 1%.
         self.plain_interval = max(
             1,
             self.total // 100,
@@ -254,8 +267,101 @@ class TerminalProgressBar:
 
         self.last_plain_report = -1
 
+        if self.is_tty:
+            self._configure_terminal()
+
         self.render(
             force=True
+        )
+
+    def _terminal_size(
+        self,
+    ) -> tuple[int, int]:
+        size = shutil.get_terminal_size(
+            fallback=(120, 24)
+        )
+
+        return (
+            max(3, size.lines),
+            max(20, size.columns),
+        )
+
+    def _configure_terminal(
+        self,
+    ) -> None:
+        """
+        Reserve the final terminal row for the progress bar.
+
+        ANSI CSI <top>;<bottom> r defines the scrolling region. We reserve
+        rows 1..N-1 for normal output and row N for progress.
+        """
+        rows, columns = (
+            self._terminal_size()
+        )
+
+        self.rows = rows
+        self.columns = columns
+
+        # Reset any previous scrolling region first.
+        sys.stdout.write(
+            "\033[r"
+        )
+
+        # Rows 1 through rows-1 are allowed to scroll.
+        sys.stdout.write(
+            f"\033[1;{rows - 1}r"
+        )
+
+        sys.stdout.flush()
+
+    def _check_resize(
+        self,
+    ) -> None:
+        """
+        Reconfigure the reserved bottom row if the terminal was resized.
+        """
+        if not self.is_tty:
+            return
+
+        rows, columns = (
+            self._terminal_size()
+        )
+
+        if (
+            rows != self.rows
+            or columns != self.columns
+        ):
+            self._configure_terminal()
+
+    def _format_duration(
+        self,
+        seconds: float | None,
+    ) -> str:
+        if (
+            seconds is None
+            or not np.isfinite(seconds)
+        ):
+            return "--:--:--"
+
+        seconds = max(
+            0,
+            int(round(seconds)),
+        )
+
+        hours, remainder = divmod(
+            seconds,
+            3600,
+        )
+
+        minutes, seconds = divmod(
+            remainder,
+            60,
+        )
+
+        return (
+            f"{hours:d}:"
+            f"{minutes:02d}:"
+            f"{seconds:02d}"
         )
 
     def _build_line(
@@ -266,9 +372,21 @@ class TerminalProgressBar:
             - self.started
         )
 
-        if elapsed > 0 and self.completed > 0:
+        # Rate refers to work completed during this invocation rather than
+        # previously completed work supplied through initial=.
+        newly_completed = max(
+            0,
+            self.completed
+            - getattr(
+                self,
+                "_initial_completed",
+                0,
+            ),
+        )
+
+        if elapsed > 0 and newly_completed > 0:
             rate = (
-                self.completed
+                newly_completed
                 / elapsed
             )
         else:
@@ -302,32 +420,29 @@ class TerminalProgressBar:
             * fraction
         )
 
-        terminal_width = (
-            shutil.get_terminal_size(
-                fallback=(
-                    120,
-                    24,
-                )
-            ).columns
-        )
-
         prefix = (
             f"{self.description} "
         )
 
         suffix = (
-            f" {percent:6.2f}% "
-            f"{self.completed}/{self.total}"
+            f" {percent:6.2f}%"
+            f" {self.completed}/{self.total}"
             f" | ok={self.successful}"
             f" failed={self.failed}"
             f" | {rate:.2f} job/s"
-            f" | ETA {_format_duration(eta)}"
+            f" | ETA {self._format_duration(eta)}"
         )
 
-        # Keep enough room to avoid terminal wrapping, because wrapping would
-        # prevent the progress bar from remaining a single bottom line.
+        columns = (
+            self.columns
+            if self.is_tty
+            else shutil.get_terminal_size(
+                fallback=(120, 24)
+            ).columns
+        )
+
         available = (
-            terminal_width
+            columns
             - len(prefix)
             - len(suffix)
             - 2
@@ -346,10 +461,10 @@ class TerminalProgressBar:
                 )
             )
 
-            filled = min(
-                bar_width,
-                max(
-                    0,
+            filled = max(
+                0,
+                min(
+                    bar_width,
                     filled,
                 ),
             )
@@ -371,7 +486,6 @@ class TerminalProgressBar:
             )
 
         else:
-            # Fall back to a compact line on particularly narrow terminals.
             line = (
                 f"{self.description}: "
                 f"{percent:6.2f}% "
@@ -379,33 +493,48 @@ class TerminalProgressBar:
                 f" ok={self.successful}"
                 f" failed={self.failed}"
                 f" {rate:.2f} job/s"
-                f" ETA {_format_duration(eta)}"
+                f" ETA {self._format_duration(eta)}"
             )
 
-        # Avoid accidental wrapping even if terminal-width calculations differ
-        # slightly from rendered Unicode width.
-        if terminal_width > 1:
-            line = line[
-                : terminal_width - 1
-            ]
-
-        return line
+        # Avoid wrapping onto another terminal line.
+        return line[
+            : max(
+                1,
+                columns - 1,
+            )
+        ]
 
     def render(
         self,
         force: bool = False,
     ) -> None:
-        """Render the current progress state."""
+        """
+        Render the progress bar.
+
+        Interactive terminals always render directly onto the reserved final
+        row, independent of the current cursor position.
+        """
         line = self._build_line()
 
         if self.is_tty:
-            # \r moves to the beginning of the line.
-            # ANSI 2K clears the entire current line.
+            self._check_resize()
+
+            # Move directly to the final terminal row.
             sys.stdout.write(
-                "\r\033[2K"
-                + line
+                f"\033[{self.rows};1H"
             )
+
+            # Clear the entire row.
+            sys.stdout.write(
+                "\033[2K"
+            )
+
+            sys.stdout.write(
+                line
+            )
+
             sys.stdout.flush()
+
             return
 
         should_report = (
@@ -432,7 +561,7 @@ class TerminalProgressBar:
         self,
         succeeded: bool,
     ) -> None:
-        """Advance the progress bar by one completed attempt."""
+        """Record one completed job and redraw the bottom-row bar."""
         self.completed += 1
 
         if succeeded:
@@ -447,46 +576,88 @@ class TerminalProgressBar:
         message: str,
     ) -> None:
         """
-        Print a permanent message above the progress bar.
+        Print permanent output in the scrolling region above the bar.
 
-        The progress bar is cleared first and redrawn afterward so it remains
-        the bottom line.
+        The bottom row remains reserved for progress.
         """
-        if self.is_tty:
-            sys.stdout.write(
-                "\r\033[2K"
-            )
-
-            sys.stdout.write(
-                message.rstrip()
-                + "\n"
-            )
-
-            sys.stdout.flush()
-
-            self.render(
-                force=True
-            )
-
-        else:
+        if not self.is_tty:
             print(
                 message,
                 flush=True,
             )
+            return
 
-    def close(
-        self,
-    ) -> None:
-        """Finish the progress display and move to the next terminal line."""
+        self._check_resize()
+
+        # Move to the final line of the scrolling region.
+        sys.stdout.write(
+            f"\033[{self.rows - 1};1H"
+        )
+
+        sys.stdout.write(
+            "\033[2K"
+        )
+
+        lines = (
+            str(message)
+            .rstrip()
+            .splitlines()
+        )
+
+        if not lines:
+            lines = [""]
+
+        for line in lines:
+            sys.stdout.write(
+                line
+                + "\n"
+            )
+
+        sys.stdout.flush()
+
+        # Put progress back onto the reserved final row.
         self.render(
             force=True
         )
 
-        if self.is_tty:
-            sys.stdout.write(
-                "\n"
+    def close(
+        self,
+    ) -> None:
+        """
+        Restore normal terminal scrolling before returning control to Python.
+        """
+        if not self.is_tty:
+            self.render(
+                force=True
             )
-            sys.stdout.flush()
+            return
+
+        self.render(
+            force=True
+        )
+
+        # Restore the terminal's normal full-screen scrolling region.
+        sys.stdout.write(
+            "\033[r"
+        )
+
+        # Move beneath the progress display and clear the current line.
+        sys.stdout.write(
+            f"\033[{self.rows};1H"
+        )
+
+        sys.stdout.write(
+            "\033[2K"
+        )
+
+        # Print the final progress state normally so it remains visible after
+        # the reserved-row mode has ended.
+        sys.stdout.write(
+            self._build_line()
+            + "\n"
+        )
+
+        sys.stdout.flush()
 
 
 # ---------------------------------------------------------------------------
