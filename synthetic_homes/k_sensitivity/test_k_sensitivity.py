@@ -44,6 +44,11 @@ The script does not modify the source dataset or calibration data.
 If no usable target examples can be loaded from dataset/, the script falls
 back to using the k=15 calibration grid itself as the common target set.
 
+Calibration metadata, EnergyPlus summaries, and runtime metadata are each
+parsed only once. The analysis reports stage-level wall-clock timings rather
+than using a persistent progress bar because no EnergyPlus simulations are run
+during this experiment.
+
 Default usage:
 
     python3 test_k_sensitivity.py
@@ -64,9 +69,10 @@ import json
 import math
 import statistics
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Iterator, List, Optional, Sequence
 
 
 # ---------------------------------------------------------------------------
@@ -76,15 +82,18 @@ from typing import Any, Dict, List, Optional, Sequence
 SCRIPT_DIR = Path(__file__).resolve().parent
 
 DEFAULT_CALIBRATION_DIR = (
-    SCRIPT_DIR / "calibration_grid"
+    SCRIPT_DIR
+    / "calibration_grid"
 )
 
 DEFAULT_DATASET_DIR = (
-    SCRIPT_DIR / "dataset"
+    SCRIPT_DIR
+    / "dataset"
 )
 
 DEFAULT_OUTPUT_DIR = (
-    SCRIPT_DIR / "k_sensitivity_results"
+    SCRIPT_DIR
+    / "k_sensitivity_results"
 )
 
 EXPECTED_MAX_K = 15
@@ -106,7 +115,6 @@ REQUIRED_PARAMETERS = (
     "hvac_heating_cop",
     "hvac_cooling_cop",
 )
-
 
 HVAC_SIM_FEATURE_CANDIDATES = (
     "Electricity:HVAC [J](Hourly)",
@@ -143,9 +151,38 @@ class CalibrationConfig:
 
     max_k: int
     k_values: tuple[int, ...]
-    level_sets: Dict[str, tuple[int, ...]]
-    parameter_levels: Dict[str, tuple[float, ...]]
+    level_sets: Dict[
+        str,
+        tuple[int, ...],
+    ]
+    parameter_levels: Dict[
+        str,
+        tuple[float, ...],
+    ]
     reference_k: str
+
+
+@dataclass(frozen=True)
+class CalibrationData:
+    """
+    Calibration artifacts loaded once for the complete experiment.
+
+    Keeping these parsed objects in memory avoids repeatedly reparsing the
+    potentially large calibration JSON files.
+    """
+
+    meta_records: List[
+        Dict[str, Any]
+    ]
+
+    stat_records: List[
+        Dict[str, Any]
+    ]
+
+    runtime_jobs: Dict[
+        str,
+        Dict[str, Any],
+    ]
 
 
 @dataclass(frozen=True)
@@ -178,6 +215,43 @@ class LabeledExample:
     hvac_label: float
     insulation_label: float
     overall_label: float
+
+
+# ---------------------------------------------------------------------------
+# Console timing
+# ---------------------------------------------------------------------------
+
+@contextmanager
+def stage(
+    number: int,
+    total: int,
+    description: str,
+) -> Iterator[None]:
+    """Print and time one major analysis stage."""
+    print(
+        f"[{number}/{total}] "
+        f"{description}...",
+        flush=True,
+    )
+
+    started = (
+        time.perf_counter()
+    )
+
+    try:
+        yield
+
+    finally:
+        elapsed = (
+            time.perf_counter()
+            - started
+        )
+
+        print(
+            f"      done in "
+            f"{elapsed:.2f} s"
+        )
+        print()
 
 
 # ---------------------------------------------------------------------------
@@ -233,7 +307,8 @@ def build_paths(
     return ExperimentPaths(
         calibration_dir=calibration,
         calibration_data_dir=(
-            calibration / "data"
+            calibration
+            / "data"
         ),
         dataset_dir=dataset,
         output_dir=output,
@@ -271,6 +346,7 @@ def write_json(
             indent=2,
             sort_keys=True,
         )
+
         handle.write(
             "\n"
         )
@@ -316,7 +392,9 @@ def evenly_spaced_level_indices(
         for i in range(k)
     )
 
-    if len(set(indices)) != k:
+    if len(
+        set(indices)
+    ) != k:
         raise RuntimeError(
             f"Could not construct {k} unique levels "
             f"from 1..{max_k}: {indices}"
@@ -353,8 +431,11 @@ def load_calibration_config(
 
     try:
         max_k = int(
-            payload["max_k"]
+            payload[
+                "max_k"
+            ]
         )
+
     except (
         KeyError,
         TypeError,
@@ -404,8 +485,10 @@ def load_calibration_config(
         try:
             converted = tuple(
                 float(value)
-                for value in values
+                for value
+                in values
             )
+
         except (
             TypeError,
             ValueError,
@@ -414,7 +497,9 @@ def load_calibration_config(
                 f"Invalid levels for {parameter_name!r}."
             ) from exc
 
-        if len(converted) != max_k:
+        if len(
+            converted
+        ) != max_k:
             raise RuntimeError(
                 f"{parameter_name!r} has {len(converted)} levels; "
                 f"expected {max_k}."
@@ -428,11 +513,14 @@ def load_calibration_config(
         str,
         tuple[int, ...],
     ] = {
-        f"k{k}": evenly_spaced_level_indices(
-            k,
-            max_k,
+        f"k{k}": (
+            evenly_spaced_level_indices(
+                k,
+                max_k,
+            )
         )
-        for k in K_VALUES
+        for k
+        in K_VALUES
     }
 
     return CalibrationConfig(
@@ -451,16 +539,15 @@ def load_calibration_config(
 def flatten_records(
     value: Any,
 ) -> List[Dict[str, Any]]:
-    """
-    Convert common JSON shapes into a list of dictionaries.
-    """
+    """Convert common JSON shapes into a list of dictionaries."""
     if isinstance(
         value,
         list,
     ):
         return [
             item
-            for item in value
+            for item
+            in value
             if isinstance(
                 item,
                 dict,
@@ -488,27 +575,21 @@ def flatten_records(
             ):
                 return [
                     item
-                    for item in nested
+                    for item
+                    in nested
                     if isinstance(
                         item,
                         dict,
                     )
                 ]
 
-        # Common mapping shape:
-        #
-        #   {
-        #       "cal_00001": {...},
-        #       "cal_00002": {...},
-        #       ...
-        #   }
-        #
         if all(
             isinstance(
                 item,
                 dict,
             )
-            for item in value.values()
+            for item
+            in value.values()
         ):
             records = []
 
@@ -572,7 +653,8 @@ def get_nested(
                 current,
                 dict,
             )
-            or part not in current
+            or part
+            not in current
         ):
             return None
 
@@ -602,6 +684,126 @@ def as_float(
 
 
 # ---------------------------------------------------------------------------
+# Calibration artifacts
+# ---------------------------------------------------------------------------
+
+def calibration_file_paths(
+    paths: ExperimentPaths,
+) -> tuple[
+    Path,
+    Path,
+    Path,
+]:
+    meta_path = require_file(
+        paths.calibration_data_dir
+        / "calibration_meta.json"
+    )
+
+    stats_path = require_file(
+        paths.calibration_data_dir
+        / "summary_stats.json"
+    )
+
+    runtime_path = require_file(
+        paths.calibration_data_dir
+        / "calibration_runtime.json"
+    )
+
+    return (
+        meta_path,
+        stats_path,
+        runtime_path,
+    )
+
+
+def load_calibration_data(
+    paths: ExperimentPaths,
+) -> CalibrationData:
+    """
+    Load all large calibration artifacts exactly once.
+    """
+    (
+        meta_path,
+        stats_path,
+        runtime_path,
+    ) = calibration_file_paths(
+        paths
+    )
+
+    meta_payload = read_json(
+        meta_path
+    )
+
+    stats_payload = read_json(
+        stats_path
+    )
+
+    runtime_payload = read_json(
+        runtime_path
+    )
+
+    meta_records = flatten_records(
+        meta_payload
+    )
+
+    stat_records = flatten_records(
+        stats_payload
+    )
+
+    if not isinstance(
+        runtime_payload,
+        dict,
+    ):
+        raise RuntimeError(
+            f"{runtime_path} must contain a JSON object."
+        )
+
+    raw_jobs = runtime_payload.get(
+        "jobs"
+    )
+
+    if not isinstance(
+        raw_jobs,
+        dict,
+    ):
+        raise RuntimeError(
+            f"{runtime_path} does not contain a 'jobs' timing dictionary."
+        )
+
+    runtime_jobs: Dict[
+        str,
+        Dict[str, Any],
+    ] = {}
+
+    for name, record in raw_jobs.items():
+        if isinstance(
+            record,
+            dict,
+        ):
+            runtime_jobs[
+                str(name)
+            ] = record
+
+    print(
+        f"      {len(meta_records):,} metadata records"
+    )
+
+    print(
+        f"      {len(stat_records):,} summary-stat records"
+    )
+
+    print(
+        f"      {len(runtime_jobs):,} runtime records"
+    )
+
+    return CalibrationData(
+        meta_records=meta_records,
+        stat_records=stat_records,
+        runtime_jobs=runtime_jobs,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Calibration-level handling
 # ---------------------------------------------------------------------------
 
@@ -610,9 +812,7 @@ def nearest_level(
     value: Any,
     config: CalibrationConfig,
 ) -> Optional[int]:
-    """
-    Find the nearest master-grid level for one physical parameter.
-    """
+    """Find the nearest master-grid level for one physical parameter."""
     numeric_value = as_float(
         value
     )
@@ -635,7 +835,8 @@ def nearest_level(
     )
 
     return (
-        index + 1
+        index
+        + 1
     )
 
 
@@ -643,9 +844,7 @@ def extract_calibration_levels(
     record: Dict[str, Any],
     config: CalibrationConfig,
 ) -> Optional[Dict[str, int]]:
-    """
-    Read or infer one-based master-grid levels.
-    """
+    """Read or infer one-based master-grid levels."""
     explicit = record.get(
         "ordinal_levels"
     )
@@ -751,18 +950,18 @@ def level_position(
     level: int,
     max_k: int,
 ) -> float:
-    """
-    Map a master-grid level to its common semantic position in [0, 1].
-    """
+    """Map a master-grid level to its semantic position in [0, 1]."""
     if not 1 <= level <= max_k:
         raise ValueError(
             f"level must be in 1..{max_k}; got {level}."
         )
 
     return (
-        level - 1
+        level
+        - 1
     ) / (
-        max_k - 1
+        max_k
+        - 1
     )
 
 
@@ -779,9 +978,7 @@ def resolve_sim_block(
             sim_var
         ]
 
-    wanted = (
-        sim_var.strip()
-    )
+    wanted = sim_var.strip()
 
     by_stripped = {
         str(key).strip(): value
@@ -819,12 +1016,16 @@ def resolve_sim_block(
         )
     ]
 
-    if len(matches) == 1:
+    if len(
+        matches
+    ) == 1:
         return matches[
             0
         ][1]
 
-    if len(matches) > 1:
+    if len(
+        matches
+    ) > 1:
         return sorted(
             matches,
             key=lambda item: len(
@@ -932,69 +1133,19 @@ def extract_stat_value(
 
 
 # ---------------------------------------------------------------------------
-# Calibration-grid loading
+# Shared calibration-row preparation
 # ---------------------------------------------------------------------------
 
-def calibration_file_paths(
-    paths: ExperimentPaths,
-) -> tuple[
-    Path,
-    Path,
-    Path,
+def build_stat_index(
+    stat_records: Sequence[
+        Dict[str, Any]
+    ],
+) -> Dict[
+    str,
+    Dict[str, Any],
 ]:
-    meta_path = require_file(
-        paths.calibration_data_dir
-        / "calibration_meta.json"
-    )
-
-    stats_path = require_file(
-        paths.calibration_data_dir
-        / "summary_stats.json"
-    )
-
-    runtime_path = require_file(
-        paths.calibration_data_dir
-        / "calibration_runtime.json"
-    )
-
-    return (
-        meta_path,
-        stats_path,
-        runtime_path,
-    )
-
-
-def load_calibration_records(
-    paths: ExperimentPaths,
-    config: CalibrationConfig,
-) -> List[RawExample]:
-    """
-    Load the full k=15 calibration grid as raw examples.
-
-    This is used only as a target-set fallback if dataset/ contains no reusable
-    raw examples.
-    """
-    (
-        meta_path,
-        stats_path,
-        _,
-    ) = calibration_file_paths(
-        paths
-    )
-
-    meta_records = flatten_records(
-        read_json(
-            meta_path
-        )
-    )
-
-    stat_records = flatten_records(
-        read_json(
-            stats_path
-        )
-    )
-
-    stats_by_id: Dict[
+    """Index summary-stat records once by calibration ID."""
+    result: Dict[
         str,
         Dict[str, Any],
     ] = {}
@@ -1005,123 +1156,200 @@ def load_calibration_records(
         )
 
         if identifier is not None:
-            stats_by_id[
+            result[
                 identifier
             ] = record
 
-    calibration_rows: List[
-        RawExample
+    return result
+
+
+def build_raw_calibration_row(
+    meta_record: Dict[str, Any],
+    stats_by_id: Dict[
+        str,
+        Dict[str, Any],
+    ],
+    config: CalibrationConfig,
+) -> tuple[
+    Optional[RawExample],
+    Optional[Dict[str, int]],
+]:
+    """
+    Construct one reusable RawExample and its master-grid ordinal levels.
+    """
+    identifier = get_identifier(
+        meta_record
+    )
+
+    if identifier is None:
+        return (
+            None,
+            None,
+        )
+
+    levels = extract_calibration_levels(
+        meta_record,
+        config,
+    )
+
+    if levels is None:
+        return (
+            None,
+            None,
+        )
+
+    stats_record = stats_by_id.get(
+        identifier,
+        {},
+    )
+
+    merged = {
+        **stats_record,
+        **meta_record,
+    }
+
+    sim_hvac = extract_stat_value(
+        merged,
+        HVAC_SIM_FEATURE_CANDIDATES,
+    )
+
+    sim_insulation = extract_stat_value(
+        merged,
+        INSULATION_SIM_FEATURE_CANDIDATES,
+    )
+
+    if (
+        sim_hvac is None
+        or sim_insulation is None
+    ):
+        return (
+            None,
+            None,
+        )
+
+    text_hvac = statistics.mean(
+        (
+            level_position(
+                levels[
+                    "heating"
+                ],
+                config.max_k,
+            ),
+            level_position(
+                levels[
+                    "cooling"
+                ],
+                config.max_k,
+            ),
+        )
+    )
+
+    text_insulation = statistics.mean(
+        (
+            level_position(
+                levels[
+                    "wall"
+                ],
+                config.max_k,
+            ),
+            level_position(
+                levels[
+                    "roof"
+                ],
+                config.max_k,
+            ),
+        )
+    )
+
+    return (
+        RawExample(
+            example_id=identifier,
+            text_hvac=float(
+                text_hvac
+            ),
+            text_insulation=float(
+                text_insulation
+            ),
+            sim_hvac=float(
+                sim_hvac
+            ),
+            sim_insulation=float(
+                sim_insulation
+            ),
+        ),
+        levels,
+    )
+
+
+def prepare_master_rows(
+    data: CalibrationData,
+    config: CalibrationConfig,
+) -> List[
+    tuple[
+        RawExample,
+        Dict[str, int],
+    ]
+]:
+    """
+    Parse calibration examples once and retain both scores and ordinal levels.
+    """
+    stats_by_id = build_stat_index(
+        data.stat_records
+    )
+
+    rows: List[
+        tuple[
+            RawExample,
+            Dict[str, int],
+        ]
     ] = []
 
     skipped = 0
 
-    for meta_record in meta_records:
-        identifier = get_identifier(
-            meta_record
-        )
-
-        if identifier is None:
-            skipped += 1
-            continue
-
-        levels = extract_calibration_levels(
-            meta_record,
-            config,
-        )
-
-        stats_record = stats_by_id.get(
-            identifier,
-            {},
-        )
-
-        merged = {
-            **stats_record,
-            **meta_record,
-        }
-
-        sim_hvac = extract_stat_value(
-            merged,
-            HVAC_SIM_FEATURE_CANDIDATES,
-        )
-
-        sim_insulation = extract_stat_value(
-            merged,
-            INSULATION_SIM_FEATURE_CANDIDATES,
+    for meta_record in data.meta_records:
+        row, levels = (
+            build_raw_calibration_row(
+                meta_record,
+                stats_by_id,
+                config,
+            )
         )
 
         if (
-            levels is None
-            or sim_hvac is None
-            or sim_insulation is None
+            row is None
+            or levels is None
         ):
             skipped += 1
             continue
 
-        text_hvac = statistics.mean(
+        rows.append(
             (
-                level_position(
-                    levels[
-                        "heating"
-                    ],
-                    config.max_k,
-                ),
-                level_position(
-                    levels[
-                        "cooling"
-                    ],
-                    config.max_k,
-                ),
+                row,
+                levels,
             )
         )
 
-        text_insulation = statistics.mean(
-            (
-                level_position(
-                    levels[
-                        "wall"
-                    ],
-                    config.max_k,
-                ),
-                level_position(
-                    levels[
-                        "roof"
-                    ],
-                    config.max_k,
-                ),
-            )
-        )
-
-        calibration_rows.append(
-            RawExample(
-                example_id=identifier,
-                text_hvac=float(
-                    text_hvac
-                ),
-                text_insulation=float(
-                    text_insulation
-                ),
-                sim_hvac=float(
-                    sim_hvac
-                ),
-                sim_insulation=float(
-                    sim_insulation
-                ),
-            )
-        )
-
-    if not calibration_rows:
+    if not rows:
         raise RuntimeError(
-            "No calibration rows could be loaded. Check "
+            "No calibration rows could be constructed. Check "
             "calibration_meta.json and summary_stats.json."
         )
 
     print(
-        f"Loaded {len(calibration_rows)} calibration rows; "
-        f"skipped {skipped} rows."
+        f"      {len(rows):,} usable calibration rows"
     )
 
-    return calibration_rows
+    if skipped:
+        print(
+            f"      {skipped:,} rows skipped"
+        )
 
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Calibration-grid subsetting
+# ---------------------------------------------------------------------------
 
 def k_sort_key(
     k_name: str,
@@ -1135,45 +1363,33 @@ def k_sort_key(
         )
 
     return int(
-        k_name[1:]
+        k_name[
+            1:
+        ]
     )
 
 
 def load_calibration_rows_by_k(
-    paths: ExperimentPaths,
+    master_rows: Sequence[
+        tuple[
+            RawExample,
+            Dict[str, int],
+        ]
+    ],
     config: CalibrationConfig,
-) -> Dict[str, List[RawExample]]:
+) -> Dict[
+    str,
+    List[RawExample],
+]:
     """
-    Subselect each k grid from the common k=15 master calibration grid.
+    Subselect every tested grid from the common k=15 master calibration grid.
     """
-    (
-        meta_path,
-        stats_path,
-        _,
-    ) = calibration_file_paths(
-        paths
-    )
-
-    meta_records = flatten_records(
-        read_json(
-            meta_path
+    allowed_level_sets = {
+        k_name: set(
+            levels
         )
-    )
-
-    stat_records = flatten_records(
-        read_json(
-            stats_path
-        )
-    )
-
-    stats_by_id = {
-        get_identifier(
-            record
-        ): record
-        for record in stat_records
-        if get_identifier(
-            record
-        ) is not None
+        for k_name, levels
+        in config.level_sets.items()
     }
 
     rows_by_k: Dict[
@@ -1185,110 +1401,19 @@ def load_calibration_rows_by_k(
         in config.level_sets
     }
 
-    skipped = 0
-
-    for meta_record in meta_records:
-        identifier = get_identifier(
-            meta_record
-        )
-
-        levels = extract_calibration_levels(
-            meta_record,
-            config,
-        )
-
-        if (
-            identifier is None
-            or levels is None
-        ):
-            skipped += 1
-            continue
-
-        stats_record = stats_by_id.get(
-            identifier,
-            {},
-        )
-
-        merged = {
-            **stats_record,
-            **meta_record,
-        }
-
-        sim_hvac = extract_stat_value(
-            merged,
-            HVAC_SIM_FEATURE_CANDIDATES,
-        )
-
-        sim_insulation = extract_stat_value(
-            merged,
-            INSULATION_SIM_FEATURE_CANDIDATES,
-        )
-
-        if (
-            sim_hvac is None
-            or sim_insulation is None
-        ):
-            skipped += 1
-            continue
-
-        row = RawExample(
-            example_id=identifier,
-            text_hvac=float(
-                statistics.mean(
-                    (
-                        level_position(
-                            levels[
-                                "heating"
-                            ],
-                            config.max_k,
-                        ),
-                        level_position(
-                            levels[
-                                "cooling"
-                            ],
-                            config.max_k,
-                        ),
-                    )
-                )
-            ),
-            text_insulation=float(
-                statistics.mean(
-                    (
-                        level_position(
-                            levels[
-                                "wall"
-                            ],
-                            config.max_k,
-                        ),
-                        level_position(
-                            levels[
-                                "roof"
-                            ],
-                            config.max_k,
-                        ),
-                    )
-                )
-            ),
-            sim_hvac=float(
-                sim_hvac
-            ),
-            sim_insulation=float(
-                sim_insulation
-            ),
+    for row, levels in master_rows:
+        level_values = tuple(
+            levels.values()
         )
 
         for (
             k_name,
-            allowed_levels,
-        ) in config.level_sets.items():
-            allowed = set(
-                allowed_levels
-            )
-
+            allowed,
+        ) in allowed_level_sets.items():
             if all(
                 level in allowed
                 for level
-                in levels.values()
+                in level_values
             ):
                 rows_by_k[
                     k_name
@@ -1304,12 +1429,6 @@ def load_calibration_rows_by_k(
             k_name
         ]
 
-        if not rows:
-            raise RuntimeError(
-                f"No calibration rows found for {k_name}. "
-                "Check that the k=15 calibration run completed."
-            )
-
         expected = (
             len(
                 config.level_sets[
@@ -1319,22 +1438,26 @@ def load_calibration_rows_by_k(
             ** 4
         )
 
-        if len(rows) != expected:
+        if not rows:
+            raise RuntimeError(
+                f"No calibration rows found for {k_name}. "
+                "Check that the k=15 calibration run completed."
+            )
+
+        if len(
+            rows
+        ) != expected:
             print(
-                f"(Warning) {k_name}: loaded {len(rows)} "
-                f"calibration rows; expected {expected}. "
-                "Missing simulations will affect comparability."
+                f"      {k_name}: "
+                f"{len(rows):,}/{expected:,} rows "
+                "(WARNING: incomplete)"
             )
 
         else:
             print(
-                f"{k_name}: loaded all {expected} calibration rows."
+                f"      {k_name}: "
+                f"{len(rows):,}/{expected:,} calibration rows"
             )
-
-    if skipped:
-        print(
-            f"Skipped {skipped} calibration rows while filtering by k."
-        )
 
     return rows_by_k
 
@@ -1344,9 +1467,21 @@ def load_calibration_rows_by_k(
 # ---------------------------------------------------------------------------
 
 def load_energyplus_runtime_by_k(
-    paths: ExperimentPaths,
+    master_rows: Sequence[
+        tuple[
+            RawExample,
+            Dict[str, int],
+        ]
+    ],
+    runtime_jobs: Dict[
+        str,
+        Dict[str, Any],
+    ],
     config: CalibrationConfig,
-) -> Dict[str, Dict[str, Any]]:
+) -> Dict[
+    str,
+    Dict[str, Any],
+]:
     """
     Aggregate measured EnergyPlus runtimes for each k grid.
 
@@ -1354,38 +1489,6 @@ def load_energyplus_runtime_by_k(
     cumulative compute time for k is the sum of the measured durations of the
     exact EnergyPlus simulations included in that subset.
     """
-    (
-        meta_path,
-        _,
-        runtime_path,
-    ) = calibration_file_paths(
-        paths
-    )
-
-    runtime_payload = read_json(
-        runtime_path
-    )
-
-    if not isinstance(
-        runtime_payload,
-        dict,
-    ):
-        raise RuntimeError(
-            f"{runtime_path} must contain a JSON object."
-        )
-
-    jobs = runtime_payload.get(
-        "jobs"
-    )
-
-    if not isinstance(
-        jobs,
-        dict,
-    ):
-        raise RuntimeError(
-            f"{runtime_path} does not contain a 'jobs' timing dictionary."
-        )
-
     summaries: Dict[
         str,
         Dict[str, Any],
@@ -1399,30 +1502,17 @@ def load_energyplus_runtime_by_k(
         in config.level_sets
     }
 
-    meta_records = flatten_records(
-        read_json(
-            meta_path
+    allowed_level_sets = {
+        k_name: set(
+            levels
         )
-    )
+        for k_name, levels
+        in config.level_sets.items()
+    }
 
-    for meta_record in meta_records:
-        identifier = get_identifier(
-            meta_record
-        )
-
-        levels = extract_calibration_levels(
-            meta_record,
-            config,
-        )
-
-        if (
-            identifier is None
-            or levels is None
-        ):
-            continue
-
-        job = jobs.get(
-            identifier
+    for row, levels in master_rows:
+        job = runtime_jobs.get(
+            row.example_id
         )
 
         if not isinstance(
@@ -1447,18 +1537,18 @@ def load_energyplus_runtime_by_k(
             )
         )
 
+        level_values = tuple(
+            levels.values()
+        )
+
         for (
             k_name,
-            allowed_levels,
-        ) in config.level_sets.items():
-            allowed = set(
-                allowed_levels
-            )
-
+            allowed,
+        ) in allowed_level_sets.items():
             if all(
                 level in allowed
                 for level
-                in levels.values()
+                in level_values
             ):
                 summary = summaries[
                     k_name
@@ -1564,23 +1654,27 @@ def build_scaler(
     if concept == "hvac":
         text_values = [
             row.text_hvac
-            for row in rows
+            for row
+            in rows
         ]
 
         sim_values = [
             row.sim_hvac
-            for row in rows
+            for row
+            in rows
         ]
 
     elif concept == "insulation":
         text_values = [
             row.text_insulation
-            for row in rows
+            for row
+            in rows
         ]
 
         sim_values = [
             row.sim_insulation
-            for row in rows
+            for row
+            in rows
         ]
 
     else:
@@ -1728,9 +1822,7 @@ def extract_sim_score(
     concept: str,
 ) -> Optional[float]:
     if concept == "hvac":
-        candidates = (
-            HVAC_SIM_FEATURE_CANDIDATES
-        )
+        candidates = HVAC_SIM_FEATURE_CANDIDATES
 
         candidate_keys = (
             "sim_hvac",
@@ -1740,9 +1832,7 @@ def extract_sim_score(
         )
 
     elif concept == "insulation":
-        candidates = (
-            INSULATION_SIM_FEATURE_CANDIDATES
-        )
+        candidates = INSULATION_SIM_FEATURE_CANDIDATES
 
         candidate_keys = (
             "sim_insulation",
@@ -1810,28 +1900,32 @@ def extract_sim_score(
 def load_target_examples_from_dataset(
     dataset_dir: Path,
 ) -> List[RawExample]:
-    """
-    Extract reusable raw scorer values from the Synthetic Homes dataset.
-    """
+    """Extract reusable raw scorer values from the Synthetic Homes dataset."""
     if not dataset_dir.exists():
         print(
-            f"Dataset directory does not exist: {dataset_dir}"
+            f"      Dataset directory does not exist: "
+            f"{dataset_dir}"
         )
+
         return []
 
     examples: List[
         RawExample
     ] = []
 
-    seen: set[
-        str
-    ] = set()
+    seen: set[str] = set()
 
-    for path in sorted(
+    json_files = sorted(
         dataset_dir.rglob(
             "*.json"
         )
-    ):
+    )
+
+    print(
+        f"      scanning {len(json_files):,} JSON files"
+    )
+
+    for path in json_files:
         try:
             raw_json = read_json(
                 path
@@ -1932,7 +2026,7 @@ def load_target_examples_from_dataset(
             )
 
     print(
-        f"Loaded {len(examples)} target examples from {dataset_dir}."
+        f"      loaded {len(examples):,} target examples"
     )
 
     return examples
@@ -2097,7 +2191,8 @@ def pearson(
                 x - x_mean
             )
             ** 2
-            for x in x_values
+            for x
+            in x_values
         )
     )
 
@@ -2107,7 +2202,8 @@ def pearson(
                 y - y_mean
             )
             ** 2
-            for y in y_values
+            for y
+            in y_values
         )
     )
 
@@ -2190,7 +2286,9 @@ def top_fraction_overlap(
             ),
             key=lambda pair: pair[1],
             reverse=True,
-        )[:top_n]
+        )[
+            :top_n
+        ]
     }
 
     reference_top = {
@@ -2209,7 +2307,9 @@ def top_fraction_overlap(
             ),
             key=lambda pair: pair[1],
             reverse=True,
-        )[:top_n]
+        )[
+            :top_n
+        ]
     }
 
     return (
@@ -2228,9 +2328,7 @@ def summarize_against_reference(
     ],
     reference_k: str,
 ) -> List[Dict[str, Any]]:
-    """
-    Compare every tested resolution with the k=15 reference.
-    """
+    """Compare every tested resolution with the k=15 reference."""
     if not labels_by_k:
         return []
 
@@ -2265,7 +2363,8 @@ def summarize_against_reference(
 
         candidate = {
             row.example_id: row.overall_label
-            for row in rows
+            for row
+            in rows
         }
 
         common_ids = sorted(
@@ -2489,349 +2588,431 @@ def write_summary_csv(
 def run_experiment(
     paths: ExperimentPaths,
 ) -> None:
+    experiment_started = (
+        time.perf_counter()
+    )
+
     paths.output_dir.mkdir(
         parents=True,
         exist_ok=True,
     )
 
     print()
-    print("=" * 72)
+    print(
+        "=" * 72
+    )
     print(
         "Calibration-resolution sensitivity experiment"
     )
-    print("=" * 72)
     print(
-        f"Calibration directory: {paths.calibration_dir}"
+        "=" * 72
     )
     print(
-        f"Dataset directory:     {paths.dataset_dir}"
+        f"Calibration directory: "
+        f"{paths.calibration_dir}"
     )
     print(
-        f"Output directory:      {paths.output_dir}"
-    )
-    print("=" * 72)
-    print()
-
-    config = load_calibration_config(
-        paths
-    )
-
-    print(
-        f"Master calibration resolution: k={config.max_k}"
+        f"Dataset directory:     "
+        f"{paths.dataset_dir}"
     )
     print(
-        "Tested resolutions: "
-        + ", ".join(
-            str(
-                k
-            )
-            for k
-            in config.k_values
-        )
+        f"Output directory:      "
+        f"{paths.output_dir}"
+    )
+    print(
+        "=" * 72
     )
     print()
 
-    rows_by_k = load_calibration_rows_by_k(
-        paths,
-        config,
-    )
-
-    energyplus_runtime_by_k = (
-        load_energyplus_runtime_by_k(
-            paths,
-            config,
-        )
-    )
-
     # ------------------------------------------------------------------
-    # Build calibration scalers.
+    # 1. Configuration
     # ------------------------------------------------------------------
 
-    scalers: Dict[
-        str,
-        Dict[str, Scaler],
-    ] = {}
-
-    scaler_runtime_by_k: Dict[
-        str,
-        float,
-    ] = {}
-
-    for k_name in sorted(
-        rows_by_k,
-        key=k_sort_key,
+    with stage(
+        1,
+        6,
+        "Loading calibration configuration",
     ):
-        started = (
-            time.perf_counter()
+        config = load_calibration_config(
+            paths
         )
 
-        rows = rows_by_k[
-            k_name
-        ]
+        print(
+            f"      master resolution: "
+            f"k={config.max_k}"
+        )
 
-        scalers[
-            k_name
-        ] = {
-            "hvac": build_scaler(
-                rows,
-                "hvac",
-            ),
-            "insulation": build_scaler(
-                rows,
-                "insulation",
-            ),
-        }
-
-        scaler_runtime_by_k[
-            k_name
-        ] = (
-            time.perf_counter()
-            - started
+        print(
+            "      tested resolutions: "
+            + ", ".join(
+                str(k)
+                for k
+                in config.k_values
+            )
         )
 
     # ------------------------------------------------------------------
-    # Load common target set.
+    # 2. Parse large calibration artifacts once.
     # ------------------------------------------------------------------
 
-    target_examples = (
-        load_target_examples_from_dataset(
-            paths.dataset_dir
+    with stage(
+        2,
+        6,
+        "Loading calibration data",
+    ):
+        calibration_data = (
+            load_calibration_data(
+                paths
+            )
         )
-    )
 
-    target_source = (
-        "dataset"
-    )
-
-    if not target_examples:
-        print()
-        print(
-            "WARNING: No reusable raw target examples were found in "
-            "dataset/."
-        )
-        print(
-            "Falling back to the full k=15 calibration grid as the "
-            "common target set."
-        )
-        print()
-
-        target_examples = (
-            load_calibration_records(
-                paths,
+        master_rows = (
+            prepare_master_rows(
+                calibration_data,
                 config,
             )
         )
 
-        target_source = (
-            "calibration_grid_fallback"
-        )
-
     # ------------------------------------------------------------------
-    # Construct labels at each calibration resolution.
+    # 3. Construct k subsets and aggregate runtimes.
     # ------------------------------------------------------------------
 
-    labels_by_k: Dict[
-        str,
-        List[LabeledExample],
-    ] = {}
-
-    labeling_runtime_by_k: Dict[
-        str,
-        float,
-    ] = {}
-
-    for k_name in sorted(
-        config.level_sets,
-        key=k_sort_key,
+    with stage(
+        3,
+        6,
+        "Constructing calibration subsets",
     ):
-        started = (
-            time.perf_counter()
+        rows_by_k = (
+            load_calibration_rows_by_k(
+                master_rows,
+                config,
+            )
         )
 
-        labels_by_k[
-            k_name
-        ] = label_examples(
-            target_examples,
-            k_name,
-            scalers[
-                k_name
-            ][
-                "hvac"
-            ],
-            scalers[
-                k_name
-            ][
-                "insulation"
-            ],
-        )
-
-        labeling_runtime_by_k[
-            k_name
-        ] = (
-            time.perf_counter()
-            - started
+        energyplus_runtime_by_k = (
+            load_energyplus_runtime_by_k(
+                master_rows,
+                calibration_data.runtime_jobs,
+                config,
+            )
         )
 
     # ------------------------------------------------------------------
-    # Compare with k=15.
+    # 4. Build calibration scalers.
     # ------------------------------------------------------------------
 
-    reference_k = (
-        config.reference_k
-    )
+    with stage(
+        4,
+        6,
+        "Building calibration scalers",
+    ):
+        scalers: Dict[
+            str,
+            Dict[str, Scaler],
+        ] = {}
 
-    summary_rows = (
-        summarize_against_reference(
-            labels_by_k,
-            reference_k=reference_k,
-        )
-    )
+        scaler_runtime_by_k: Dict[
+            str,
+            float,
+        ] = {}
 
-    for row in summary_rows:
-        k_name = str(
-            row[
-                "calibration_resolution"
-            ]
-        )
+        for k_name in sorted(
+            rows_by_k,
+            key=k_sort_key,
+        ):
+            started = (
+                time.perf_counter()
+            )
 
-        row.update(
-            energyplus_runtime_by_k[
+            rows = rows_by_k[
                 k_name
             ]
-        )
 
-        row[
-            "scaler_build_wall_time_seconds"
-        ] = scaler_runtime_by_k[
-            k_name
-        ]
+            scalers[
+                k_name
+            ] = {
+                "hvac": build_scaler(
+                    rows,
+                    "hvac",
+                ),
+                "insulation": build_scaler(
+                    rows,
+                    "insulation",
+                ),
+            }
 
-        row[
-            "target_labeling_wall_time_seconds"
-        ] = labeling_runtime_by_k[
-            k_name
-        ]
-
-        row[
-            "analysis_wall_time_seconds"
-        ] = (
             scaler_runtime_by_k[
                 k_name
+            ] = (
+                time.perf_counter()
+                - started
+            )
+
+            print(
+                f"      {k_name}: "
+                f"{scaler_runtime_by_k[k_name]:.6f} s"
+            )
+
+    # ------------------------------------------------------------------
+    # 5. Load target examples and construct labels.
+    # ------------------------------------------------------------------
+
+    with stage(
+        5,
+        6,
+        "Loading and labeling target examples",
+    ):
+        target_examples = (
+            load_target_examples_from_dataset(
+                paths.dataset_dir
+            )
+        )
+
+        target_source = "dataset"
+
+        if not target_examples:
+            print(
+                "      WARNING: no reusable raw target examples "
+                "were found."
+            )
+
+            print(
+                "      using the full k=15 calibration grid "
+                "as the common target set"
+            )
+
+            target_examples = [
+                row
+                for row, _
+                in master_rows
             ]
-            + labeling_runtime_by_k[
+
+            target_source = (
+                "calibration_grid_fallback"
+            )
+
+            print(
+                f"      fallback target examples: "
+                f"{len(target_examples):,}"
+            )
+
+        labels_by_k: Dict[
+            str,
+            List[LabeledExample],
+        ] = {}
+
+        labeling_runtime_by_k: Dict[
+            str,
+            float,
+        ] = {}
+
+        for k_name in sorted(
+            config.level_sets,
+            key=k_sort_key,
+        ):
+            started = (
+                time.perf_counter()
+            )
+
+            labels_by_k[
+                k_name
+            ] = label_examples(
+                target_examples,
+                k_name,
+                scalers[
+                    k_name
+                ][
+                    "hvac"
+                ],
+                scalers[
+                    k_name
+                ][
+                    "insulation"
+                ],
+            )
+
+            labeling_runtime_by_k[
+                k_name
+            ] = (
+                time.perf_counter()
+                - started
+            )
+
+            print(
+                f"      {k_name}: "
+                f"{len(labels_by_k[k_name]):,} labels "
+                f"in {labeling_runtime_by_k[k_name]:.6f} s"
+            )
+
+    # ------------------------------------------------------------------
+    # 6. Compare against k=15 and write results.
+    # ------------------------------------------------------------------
+
+    with stage(
+        6,
+        6,
+        "Computing sensitivity metrics and writing results",
+    ):
+        reference_k = (
+            config.reference_k
+        )
+
+        summary_rows = (
+            summarize_against_reference(
+                labels_by_k,
+                reference_k=reference_k,
+            )
+        )
+
+        for row in summary_rows:
+            k_name = str(
+                row[
+                    "calibration_resolution"
+                ]
+            )
+
+            row.update(
+                energyplus_runtime_by_k[
+                    k_name
+                ]
+            )
+
+            row[
+                "scaler_build_wall_time_seconds"
+            ] = scaler_runtime_by_k[
                 k_name
             ]
+
+            row[
+                "target_labeling_wall_time_seconds"
+            ] = labeling_runtime_by_k[
+                k_name
+            ]
+
+            row[
+                "analysis_wall_time_seconds"
+            ] = (
+                scaler_runtime_by_k[
+                    k_name
+                ]
+                + labeling_runtime_by_k[
+                    k_name
+                ]
+            )
+
+        summary_csv_path = (
+            paths.output_dir
+            / "k_sensitivity_summary.csv"
+        )
+
+        labels_csv_path = (
+            paths.output_dir
+            / "k_sensitivity_labels.csv"
+        )
+
+        summary_json_path = (
+            paths.output_dir
+            / "k_sensitivity_summary.json"
+        )
+
+        write_summary_csv(
+            summary_csv_path,
+            summary_rows,
+        )
+
+        write_labeled_csv(
+            labels_csv_path,
+            labels_by_k,
+        )
+
+        write_json(
+            summary_json_path,
+            {
+                "target_source": target_source,
+                "num_target_examples": len(
+                    target_examples
+                ),
+                "reference_resolution": reference_k,
+                "max_k": config.max_k,
+                "tested_k_values": list(
+                    config.k_values
+                ),
+                "runtime_notes": {
+                    "energyplus_compute_seconds": (
+                        "Sum of measured per-job EnergyPlus runtimes for the "
+                        "exact simulations included in each k-grid. This is "
+                        "cumulative compute time, not parallel batch wall time."
+                    ),
+                    "analysis_wall_time_seconds": (
+                        "Measured in-process wall time for constructing both "
+                        "calibration scalers and labeling the common target set "
+                        "at each resolution."
+                    ),
+                },
+                "level_sets": {
+                    key: list(
+                        value
+                    )
+                    for key, value
+                    in config.level_sets.items()
+                },
+                "parameter_levels": {
+                    key: list(
+                        value
+                    )
+                    for key, value
+                    in config.parameter_levels.items()
+                },
+                "scalers": {
+                    k_name: {
+                        concept: {
+                            "text_mean": scaler.text_mean,
+                            "text_std": scaler.text_std,
+                            "sim_mean": scaler.sim_mean,
+                            "sim_std": scaler.sim_std,
+                        }
+                        for concept, scaler
+                        in concept_scalers.items()
+                    }
+                    for k_name, concept_scalers
+                    in scalers.items()
+                },
+                "summary": summary_rows,
+            },
         )
 
     # ------------------------------------------------------------------
-    # Write results.
+    # Console summary
     # ------------------------------------------------------------------
 
-    summary_csv_path = (
-        paths.output_dir
-        / "k_sensitivity_summary.csv"
+    print(
+        "=" * 72
     )
-
-    labels_csv_path = (
-        paths.output_dir
-        / "k_sensitivity_labels.csv"
-    )
-
-    summary_json_path = (
-        paths.output_dir
-        / "k_sensitivity_summary.json"
-    )
-
-    write_summary_csv(
-        summary_csv_path,
-        summary_rows,
-    )
-
-    write_labeled_csv(
-        labels_csv_path,
-        labels_by_k,
-    )
-
-    write_json(
-        summary_json_path,
-        {
-            "target_source": target_source,
-            "num_target_examples": len(
-                target_examples
-            ),
-            "reference_resolution": reference_k,
-            "max_k": config.max_k,
-            "tested_k_values": list(
-                config.k_values
-            ),
-            "runtime_notes": {
-                "energyplus_compute_seconds": (
-                    "Sum of measured per-job EnergyPlus runtimes for the "
-                    "exact simulations included in each k-grid. This is "
-                    "cumulative compute time, not parallel batch wall time."
-                ),
-                "analysis_wall_time_seconds": (
-                    "Measured in-process wall time for constructing both "
-                    "calibration scalers and labeling the common target set "
-                    "at each resolution."
-                ),
-            },
-            "level_sets": {
-                key: list(
-                    value
-                )
-                for key, value
-                in config.level_sets.items()
-            },
-            "parameter_levels": {
-                key: list(
-                    value
-                )
-                for key, value
-                in config.parameter_levels.items()
-            },
-            "scalers": {
-                k_name: {
-                    concept: {
-                        "text_mean": scaler.text_mean,
-                        "text_std": scaler.text_std,
-                        "sim_mean": scaler.sim_mean,
-                        "sim_std": scaler.sim_std,
-                    }
-                    for concept, scaler
-                    in concept_scalers.items()
-                }
-                for k_name, concept_scalers
-                in scalers.items()
-            },
-            "summary": summary_rows,
-        },
-    )
-
-    # ------------------------------------------------------------------
-    # Console summary.
-    # ------------------------------------------------------------------
-
-    print()
     print(
         "Calibration-resolution sensitivity summary "
-        f"(reference={reference_k}):"
+        f"(reference={reference_k})"
+    )
+    print(
+        "=" * 72
     )
 
     for row in summary_rows:
         print(
-            f"{row['calibration_resolution']}: "
-            f"grid={row['num_calibration_points']}, "
-            f"n={row['num_target_examples']}, "
+            f"{row['calibration_resolution']:>3}: "
+            f"grid={row['num_calibration_points']:>6,}, "
+            f"n={row['num_target_examples']:>6,}, "
             f"spearman={row['spearman_vs_reference']:.4f}, "
-            f"mean_abs_diff={row['mean_abs_diff_vs_reference']:.4f}, "
-            f"top10_overlap="
+            f"mean_abs_diff="
+            f"{row['mean_abs_diff_vs_reference']:.4f}, "
+            f"top10="
             f"{row['top_10_percent_overlap_vs_reference']:.4f}, "
-            f"eplus_compute="
-            f"{row['energyplus_compute_seconds']:.2f}s, "
-            f"analysis="
-            f"{row['analysis_wall_time_seconds']:.6f}s"
+            f"E+={row['energyplus_compute_seconds']:.2f}s"
         )
+
+    total_elapsed = (
+        time.perf_counter()
+        - experiment_started
+    )
 
     print()
     print(
@@ -2845,6 +3026,12 @@ def run_experiment(
     )
     print(
         f"  {summary_json_path}"
+    )
+
+    print()
+    print(
+        f"Total analysis wall time: "
+        f"{total_elapsed:.2f} s"
     )
 
 
@@ -2891,9 +3078,15 @@ def main() -> int:
     args = parser.parse_args()
 
     paths = build_paths(
-        calibration_dir=args.calibration_dir,
-        dataset_dir=args.dataset_dir,
-        output_dir=args.output_dir,
+        calibration_dir=(
+            args.calibration_dir
+        ),
+        dataset_dir=(
+            args.dataset_dir
+        ),
+        output_dir=(
+            args.output_dir
+        ),
     )
 
     run_experiment(
