@@ -18,9 +18,9 @@ For a complete theoretical treatment, see the accompanying paper (forthcoming).
 
 Implements the residential energy retrofit case study presented in the paper. The framework is used to construct supervision signals from textual inspection reports and EnergyPlus simulation outputs without requiring retrofit-priority labels. This directory contains the calibration pipeline, subset-specific scorers, fusion procedures, ablation studies, agreement and conflict experiments, and calibration-resolution sensitivity testing.
 
-#### \(k\) Sensitivity Testing
+#### $k$ Sensitivity Testing
 
-The sensitivity of the calibration-grid resolution \(k\) is evaluated using the Synthetic Homes case study. A \(k=15\) master calibration grid is generated once, and lower-resolution grids are obtained by selecting approximately evenly spaced subsets of the master grid.
+The sensitivity of the calibration-grid resolution $k$ is evaluated using the Synthetic Homes case study. A $k=15$ master calibration grid is generated once, and lower-resolution grids are obtained by selecting approximately evenly spaced subsets of the master grid.
 
 To reproduce the experiment:
 
@@ -28,7 +28,7 @@ To reproduce the experiment:
 
 2. Follow the setup instructions in the Synthetic Homes `README.md`, including installation of its Python dependencies and EnergyPlus, and activate the corresponding virtual environment.
 
-3. From this repository, generate the \(k=15\) master calibration grid using `generate_calibration_grid.py`. For example:
+3. From this repository, generate the $k=15$ master calibration grid using `generate_calibration_grid.py`. For example:
 
 ```zsh
 python3 synthetic_homes/k_sensitivity/generate_calibration_grid.py \
@@ -39,7 +39,7 @@ python3 synthetic_homes/k_sensitivity/generate_calibration_grid.py \
     --max-workers 8
 ```
 
-The generator constructs \(15^4 = 50{,}625\) EnergyPlus calibration points. Because this step is computationally intensive, execution on a remote or high-performance computing system is recommended.
+The generator constructs $15^4 = 50{,}625$ EnergyPlus calibration points. Because this step is computationally intensive, execution on a remote or high-performance computing system is recommended.
 
 The generator stores compact calibration artifacts under:
 
@@ -56,7 +56,7 @@ Raw hourly EnergyPlus outputs are summarized during execution and are not retain
 
 4. Run the Synthetic Homes pipeline normally, following the instructions in the Synthetic Homes repository, to produce the target Synthetic Homes dataset used for evaluation.
 
-5. Run the \(k\)-sensitivity analysis. If the generated Synthetic Homes dataset has been copied to `synthetic_homes/k_sensitivity/dataset/`, the default invocation is:
+5. Run the $k$-sensitivity analysis. If the generated Synthetic Homes dataset has been copied to `synthetic_homes/k_sensitivity/dataset/`, the default invocation is:
 
 ```zsh
 python3 synthetic_homes/k_sensitivity/test_k_sensitivity.py
@@ -71,7 +71,7 @@ python3 synthetic_homes/k_sensitivity/test_k_sensitivity.py \
     --output-dir synthetic_homes/k_sensitivity/k_sensitivity_results
 ```
 
-The analysis evaluates \(k \in \{2,3,5,7,9,11,13,15\}\), using \(k=15\) as the high-resolution reference. It reports rank stability, absolute changes in the resulting supervision signal, top-ranked-set overlap, and computational cost across calibration resolutions.
+The analysis evaluates $k \in \{2,3,5,7,9,11,13,15\}$, using $k=15$ as the high-resolution reference. It reports rank stability, absolute changes in the resulting supervision signal, top-ranked-set overlap, and computational cost across calibration resolutions.
 
 ### Validations in Other Domains (Sec. 4.2)
 
