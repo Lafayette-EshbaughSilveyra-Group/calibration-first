@@ -5,14 +5,10 @@ Plot calibration-resolution sensitivity results.
 
 Reads:
     k_sensitivity_results/k_sensitivity_summary.csv
+    k_sensitivity_results/k_sensitivity_labels.csv
 
 Produces:
     k_sensitivity_plots/
-        spearman_vs_resolution.png
-        top10_overlap_vs_resolution.png
-        stability_vs_compute.png
-        mean_absolute_difference.png
-        calibration_cost_scaling.png
 """
 
 from pathlib import Path
@@ -23,10 +19,19 @@ import matplotlib.pyplot as plt
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 
-INPUT = (
+RESULTS = (
     SCRIPT_DIR
     / "k_sensitivity_results"
+)
+
+SUMMARY_INPUT = (
+    RESULTS
     / "k_sensitivity_summary.csv"
+)
+
+LABEL_INPUT = (
+    RESULTS
+    / "k_sensitivity_labels.csv"
 )
 
 OUTPUT = (
@@ -37,14 +42,38 @@ OUTPUT = (
 
 def save_plot(name):
     path = OUTPUT / name
+
     plt.tight_layout()
+
     plt.savefig(
         path,
         dpi=300,
         bbox_inches="tight",
     )
+
     plt.close()
-    print(f"Wrote {path}")
+
+    print(
+        f"Wrote {path}"
+    )
+
+
+def annotate_points(
+    x,
+    y,
+    labels,
+):
+    for xi, yi, label in zip(
+        x,
+        y,
+        labels,
+    ):
+        plt.annotate(
+            label,
+            (xi, yi),
+            xytext=(5, 5),
+            textcoords="offset points",
+        )
 
 
 def main():
@@ -54,13 +83,20 @@ def main():
         exist_ok=True,
     )
 
-    df = pd.read_csv(INPUT)
+    df = pd.read_csv(
+        SUMMARY_INPUT
+    )
 
     df["k"] = (
         df["calibration_resolution"]
         .str.replace("k", "")
         .astype(int)
     )
+
+    labels = pd.read_csv(
+        LABEL_INPUT
+    )
+
 
     # ----------------------------------------------------------
     # 1. Spearman stability
@@ -95,7 +131,7 @@ def main():
 
 
     # ----------------------------------------------------------
-    # 2. Top-10% overlap
+    # 2. Top-10 overlap
     # ----------------------------------------------------------
 
     plt.figure(figsize=(6,4))
@@ -127,27 +163,31 @@ def main():
 
 
     # ----------------------------------------------------------
-    # 3. Pareto: compute vs stability
+    # 3. Top-10 overlap vs compute
     # ----------------------------------------------------------
 
     plt.figure(figsize=(6,4))
 
+    x = (
+        df["energyplus_compute_seconds"]
+        / 3600
+    )
+
+    y = (
+        df["top_10_percent_overlap_vs_reference"]
+    )
+
     plt.plot(
-        df["energyplus_compute_seconds"] / 3600,
-        df["top_10_percent_overlap_vs_reference"],
+        x,
+        y,
         marker="o",
     )
 
-    for _, row in df.iterrows():
-        plt.annotate(
-            row["calibration_resolution"],
-            (
-                row["energyplus_compute_seconds"] / 3600,
-                row["top_10_percent_overlap_vs_reference"],
-            ),
-            xytext=(5,5),
-            textcoords="offset points",
-        )
+    annotate_points(
+        x,
+        y,
+        df["calibration_resolution"],
+    )
 
     plt.xlabel(
         "EnergyPlus compute time (hours)"
@@ -160,7 +200,7 @@ def main():
     plt.grid(True)
 
     save_plot(
-        "stability_vs_compute.png"
+        "top10_vs_compute.png"
     )
 
 
@@ -192,7 +232,7 @@ def main():
 
 
     # ----------------------------------------------------------
-    # 5. k^4 scaling
+    # 5. Calibration cost scaling
     # ----------------------------------------------------------
 
     plt.figure(figsize=(6,4))
@@ -221,28 +261,33 @@ def main():
         "calibration_cost_scaling.png"
     )
 
+
     # ----------------------------------------------------------
-    # Spearman vs EnergyPlus compute cost
+    # 6. Spearman vs EnergyPlus compute
     # ----------------------------------------------------------
 
-    plt.figure(figsize=(6, 4))
+    plt.figure(figsize=(6,4))
+
+    x = (
+        df["spearman_vs_reference"]
+    )
+
+    y = (
+        df["energyplus_compute_seconds"]
+        / 3600
+    )
 
     plt.plot(
-        df["spearman_vs_reference"],
-        df["energyplus_compute_seconds"] / 3600,
+        x,
+        y,
         marker="o",
     )
 
-    for _, row in df.iterrows():
-        plt.annotate(
-            row["calibration_resolution"],
-            (
-                row["spearman_vs_reference"],
-                row["energyplus_compute_seconds"] / 3600,
-            ),
-            xytext=(5, 5),
-            textcoords="offset points",
-        )
+    annotate_points(
+        x,
+        y,
+        df["calibration_resolution"],
+    )
 
     plt.yscale(
         "log"
@@ -253,7 +298,7 @@ def main():
     )
 
     plt.ylabel(
-        "EnergyPlus compute time (hours, log scale)"
+        "EnergyPlus compute time (hours, log)"
     )
 
     plt.xlim(
@@ -261,12 +306,300 @@ def main():
         1.005,
     )
 
-    plt.grid(
-        True
-    )
+    plt.grid(True)
 
     save_plot(
         "spearman_vs_energyplus_cost.png"
+    )
+
+
+    # ----------------------------------------------------------
+    # 7. Score agreement scatter plots
+    # ----------------------------------------------------------
+
+    reference = labels[
+        labels["calibration_resolution"] == "k15"
+    ][
+        [
+            "example_id",
+            "overall_label",
+        ]
+    ].rename(
+        columns={
+            "overall_label": "reference_label"
+        }
+    )
+
+
+    for k_name in (
+        "k5",
+        "k7",
+        "k9",
+    ):
+
+        candidate = labels[
+            labels["calibration_resolution"]
+            == k_name
+        ][
+            [
+                "example_id",
+                "overall_label",
+            ]
+        ].rename(
+            columns={
+                "overall_label": "candidate_label"
+            }
+        )
+
+
+        merged = candidate.merge(
+            reference,
+            on="example_id",
+        )
+
+
+        plt.figure(
+            figsize=(5,5)
+        )
+
+        plt.scatter(
+            merged["reference_label"],
+            merged["candidate_label"],
+            s=5,
+            alpha=0.25,
+        )
+
+
+        minimum = min(
+            merged["reference_label"].min(),
+            merged["candidate_label"].min(),
+        )
+
+        maximum = max(
+            merged["reference_label"].max(),
+            merged["candidate_label"].max(),
+        )
+
+        plt.plot(
+            [
+                minimum,
+                maximum,
+            ],
+            [
+                minimum,
+                maximum,
+            ],
+            linestyle="--",
+        )
+
+
+        plt.xlabel(
+            "k=15 supervision score"
+        )
+
+        plt.ylabel(
+            f"{k_name} supervision score"
+        )
+
+        plt.axis(
+            "equal"
+        )
+
+        plt.grid(True)
+
+        save_plot(
+            f"{k_name}_score_vs_k15.png"
+        )
+
+
+    # ----------------------------------------------------------
+    # 8. Marginal Spearman gain per compute hour
+    # ----------------------------------------------------------
+
+    temp = df.sort_values(
+        "k"
+    ).copy()
+
+    temp["hours"] = (
+        temp["energyplus_compute_seconds"]
+        / 3600
+    )
+
+    temp["delta_spearman"] = (
+        temp["spearman_vs_reference"]
+        .diff()
+    )
+
+    temp["delta_hours"] = (
+        temp["hours"]
+        .diff()
+    )
+
+    temp["gain_per_hour"] = (
+        temp["delta_spearman"]
+        /
+        temp["delta_hours"]
+    )
+
+
+    plt.figure(figsize=(6,4))
+
+    plt.plot(
+        temp["k"],
+        temp["gain_per_hour"],
+        marker="o",
+    )
+
+    plt.yscale(
+        "log"
+    )
+
+    plt.xlabel(
+        "Calibration resolution k"
+    )
+
+    plt.ylabel(
+        "ΔSpearman / additional EnergyPlus hour"
+    )
+
+    plt.grid(True)
+
+    save_plot(
+        "marginal_gain_per_compute.png"
+    )
+
+
+    # ----------------------------------------------------------
+    # 9. Fraction of calibration space vs stability
+    # ----------------------------------------------------------
+
+    plt.figure(figsize=(6,4))
+
+    x = df["fraction_of_reference_grid"]
+
+    y = df["spearman_vs_reference"]
+
+    plt.plot(
+        x,
+        y,
+        marker="o",
+    )
+
+    annotate_points(
+        x,
+        y,
+        df["calibration_resolution"],
+    )
+
+    plt.xscale(
+        "log"
+    )
+
+    plt.xlabel(
+        "Fraction of k=15 calibration grid"
+    )
+
+    plt.ylabel(
+        "Spearman correlation vs k=15"
+    )
+
+    plt.grid(True)
+
+    save_plot(
+        "fraction_grid_vs_stability.png"
+    )
+
+
+    # ----------------------------------------------------------
+    # 10. Fraction of calibration space vs top-10 overlap
+    # ----------------------------------------------------------
+
+    plt.figure(figsize=(6,4))
+
+    x = df["fraction_of_reference_grid"]
+
+    y = (
+        df["top_10_percent_overlap_vs_reference"]
+    )
+
+    plt.plot(
+        x,
+        y,
+        marker="o",
+    )
+
+    annotate_points(
+        x,
+        y,
+        df["calibration_resolution"],
+    )
+
+    plt.xscale(
+        "log"
+    )
+
+    plt.xlabel(
+        "Fraction of k=15 calibration grid"
+    )
+
+    plt.ylabel(
+        "Top-10% overlap"
+    )
+
+    plt.grid(True)
+
+    save_plot(
+        "fraction_grid_vs_top10.png"
+    )
+
+
+    # ----------------------------------------------------------
+    # 11. Mean difference vs compute
+    # ----------------------------------------------------------
+
+    plt.figure(figsize=(6,4))
+
+    x = (
+        df["energyplus_compute_seconds"]
+        / 3600
+    )
+
+    y = (
+        df["mean_abs_diff_vs_reference"]
+    )
+
+    plt.plot(
+        x,
+        y,
+        marker="o",
+    )
+
+    annotate_points(
+        x,
+        y,
+        df["calibration_resolution"],
+    )
+
+    plt.xscale(
+        "log"
+    )
+
+    plt.yscale(
+        "log"
+    )
+
+    plt.xlabel(
+        "EnergyPlus compute time (hours, log)"
+    )
+
+    plt.ylabel(
+        "Mean |Δκ| vs k=15 (log)"
+    )
+
+    plt.grid(True)
+
+    save_plot(
+        "difference_vs_compute.png"
     )
 
 
