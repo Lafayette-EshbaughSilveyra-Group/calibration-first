@@ -183,7 +183,10 @@ def _format_duration(
     seconds: float | None,
 ) -> str:
     """Format a duration for compact terminal display."""
-    if seconds is None or not np.isfinite(seconds):
+    if (
+        seconds is None
+        or not np.isfinite(seconds)
+    ):
         return "--:--:--"
 
     seconds = max(
@@ -212,11 +215,17 @@ class TerminalProgressBar:
     """
     Dependency-free progress bar fixed to the bottom row of the terminal.
 
-    In an interactive ANSI-compatible terminal, the final terminal row is
-    reserved for the progress bar. Messages scroll in the region above it.
+    In an interactive ANSI-compatible terminal, rows 1..N-1 are used as the
+    normal scrolling region and row N is reserved for the progress display.
 
-    If stdout is redirected to a file or otherwise is not a TTY, periodic
-    ordinary progress lines are emitted instead.
+    Only the parent process should write to the terminal while the bar is
+    active. ProcessPool workers therefore have their stdout and stderr file
+    descriptors redirected to /dev/null during initialization.
+
+    Progress redraws are throttled to avoid excessive terminal refreshes.
+
+    If stdout is redirected or is otherwise not a TTY, periodic ordinary
+    progress lines are emitted instead.
     """
 
     def __init__(
@@ -224,6 +233,7 @@ class TerminalProgressBar:
         total: int,
         description: str = "Calibration grid",
         initial: int = 0,
+        render_interval: float = 0.20,
     ) -> None:
         self.total = max(
             0,
@@ -240,32 +250,35 @@ class TerminalProgressBar:
             ),
         )
 
-        self._initial_completed = (
-            self.completed
-        )
+        self._initial_completed = self.completed
 
-        self.successful = (
-            self.completed
-        )
-
+        # Previously completed jobs are known successful jobs.
+        self.successful = self.completed
         self.failed = 0
 
         self.started = time.perf_counter()
 
-        self.is_tty = (
-            sys.stdout.isatty()
-        )
+        self.is_tty = sys.stdout.isatty()
 
         self.rows = 0
         self.columns = 0
 
-        # For redirected output, emit roughly one line per 1%.
+        self.render_interval = max(
+            0.05,
+            float(render_interval),
+        )
+
+        self.last_render_time = 0.0
+
+        # For redirected output, emit approximately one line per 1%.
         self.plain_interval = max(
             1,
             self.total // 100,
         )
 
         self.last_plain_report = -1
+
+        self._closed = False
 
         if self.is_tty:
             self._configure_terminal()
@@ -292,22 +305,19 @@ class TerminalProgressBar:
         """
         Reserve the final terminal row for the progress bar.
 
-        ANSI CSI <top>;<bottom> r defines the scrolling region. We reserve
-        rows 1..N-1 for normal output and row N for progress.
+        ANSI CSI <top>;<bottom> r defines the scrolling region.
         """
-        rows, columns = (
-            self._terminal_size()
-        )
+        rows, columns = self._terminal_size()
 
         self.rows = rows
         self.columns = columns
 
-        # Reset any previous scrolling region first.
+        # Restore the default region first.
         sys.stdout.write(
             "\033[r"
         )
 
-        # Rows 1 through rows-1 are allowed to scroll.
+        # Reserve the last row for the progress display.
         sys.stdout.write(
             f"\033[1;{rows - 1}r"
         )
@@ -317,52 +327,17 @@ class TerminalProgressBar:
     def _check_resize(
         self,
     ) -> None:
-        """
-        Reconfigure the reserved bottom row if the terminal was resized.
-        """
+        """Reconfigure the scrolling region if the terminal was resized."""
         if not self.is_tty:
             return
 
-        rows, columns = (
-            self._terminal_size()
-        )
+        rows, columns = self._terminal_size()
 
         if (
             rows != self.rows
             or columns != self.columns
         ):
             self._configure_terminal()
-
-    def _format_duration(
-        self,
-        seconds: float | None,
-    ) -> str:
-        if (
-            seconds is None
-            or not np.isfinite(seconds)
-        ):
-            return "--:--:--"
-
-        seconds = max(
-            0,
-            int(round(seconds)),
-        )
-
-        hours, remainder = divmod(
-            seconds,
-            3600,
-        )
-
-        minutes, seconds = divmod(
-            remainder,
-            60,
-        )
-
-        return (
-            f"{hours:d}:"
-            f"{minutes:02d}:"
-            f"{seconds:02d}"
-        )
 
     def _build_line(
         self,
@@ -372,21 +347,18 @@ class TerminalProgressBar:
             - self.started
         )
 
-        # Rate refers to work completed during this invocation rather than
-        # previously completed work supplied through initial=.
-        newly_completed = max(
+        newly_processed = max(
             0,
             self.completed
-            - getattr(
-                self,
-                "_initial_completed",
-                0,
-            ),
+            - self._initial_completed,
         )
 
-        if elapsed > 0 and newly_completed > 0:
+        if (
+            elapsed > 0
+            and newly_processed > 0
+        ):
             rate = (
-                newly_completed
+                newly_processed
                 / elapsed
             )
         else:
@@ -398,13 +370,11 @@ class TerminalProgressBar:
             - self.completed,
         )
 
-        if rate > 0:
-            eta = (
-                remaining
-                / rate
-            )
-        else:
-            eta = None
+        eta = (
+            remaining / rate
+            if rate > 0
+            else None
+        )
 
         if self.total > 0:
             fraction = min(
@@ -430,7 +400,7 @@ class TerminalProgressBar:
             f" | ok={self.successful}"
             f" failed={self.failed}"
             f" | {rate:.2f} job/s"
-            f" | ETA {self._format_duration(eta)}"
+            f" | ETA {_format_duration(eta)}"
         )
 
         columns = (
@@ -493,10 +463,10 @@ class TerminalProgressBar:
                 f" ok={self.successful}"
                 f" failed={self.failed}"
                 f" {rate:.2f} job/s"
-                f" ETA {self._format_duration(eta)}"
+                f" ETA {_format_duration(eta)}"
             )
 
-        # Avoid wrapping onto another terminal line.
+        # Avoid wrapping onto a second terminal line.
         return line[
             : max(
                 1,
@@ -508,23 +478,36 @@ class TerminalProgressBar:
         self,
         force: bool = False,
     ) -> None:
-        """
-        Render the progress bar.
+        """Render the current progress state."""
+        if self._closed:
+            return
 
-        Interactive terminals always render directly onto the reserved final
-        row, independent of the current cursor position.
-        """
-        line = self._build_line()
+        now = time.perf_counter()
+
+        if (
+            self.is_tty
+            and not force
+            and self.completed < self.total
+            and (
+                now
+                - self.last_render_time
+                < self.render_interval
+            )
+        ):
+            return
 
         if self.is_tty:
             self._check_resize()
 
-            # Move directly to the final terminal row.
+        line = self._build_line()
+
+        if self.is_tty:
+            # Move directly to the reserved final row.
             sys.stdout.write(
                 f"\033[{self.rows};1H"
             )
 
-            # Clear the entire row.
+            # Clear it before drawing.
             sys.stdout.write(
                 "\033[2K"
             )
@@ -534,6 +517,8 @@ class TerminalProgressBar:
             )
 
             sys.stdout.flush()
+
+            self.last_render_time = now
 
             return
 
@@ -557,12 +542,17 @@ class TerminalProgressBar:
                 self.completed
             )
 
+            self.last_render_time = now
+
     def advance(
         self,
         succeeded: bool,
     ) -> None:
-        """Record one completed job and redraw the bottom-row bar."""
-        self.completed += 1
+        """Record one processed job and redraw the progress bar."""
+        self.completed = min(
+            self.total,
+            self.completed + 1,
+        )
 
         if succeeded:
             self.successful += 1
@@ -576,9 +566,9 @@ class TerminalProgressBar:
         message: str,
     ) -> None:
         """
-        Print permanent output in the scrolling region above the bar.
+        Print a permanent message in the scrolling region above the bar.
 
-        The bottom row remains reserved for progress.
+        The progress display remains on the reserved final row.
         """
         if not self.is_tty:
             print(
@@ -589,15 +579,6 @@ class TerminalProgressBar:
 
         self._check_resize()
 
-        # Move to the final line of the scrolling region.
-        sys.stdout.write(
-            f"\033[{self.rows - 1};1H"
-        )
-
-        sys.stdout.write(
-            "\033[2K"
-        )
-
         lines = (
             str(message)
             .rstrip()
@@ -607,15 +588,28 @@ class TerminalProgressBar:
         if not lines:
             lines = [""]
 
+        # Move to the bottom row of the scrolling region.
+        sys.stdout.write(
+            f"\033[{self.rows - 1};1H"
+        )
+
         for line in lines:
             sys.stdout.write(
+                "\033[2K"
+            )
+
+            sys.stdout.write(
                 line
-                + "\n"
+            )
+
+            # Because this cursor is at the bottom of the scrolling region,
+            # newline scrolls only rows 1..N-1.
+            sys.stdout.write(
+                "\n"
             )
 
         sys.stdout.flush()
 
-        # Put progress back onto the reserved final row.
         self.render(
             force=True
         )
@@ -623,25 +617,32 @@ class TerminalProgressBar:
     def close(
         self,
     ) -> None:
-        """
-        Restore normal terminal scrolling before returning control to Python.
-        """
+        """Restore normal terminal scrolling."""
+        if self._closed:
+            return
+
         if not self.is_tty:
             self.render(
                 force=True
             )
+
+            self._closed = True
             return
 
+        # Draw the final state one last time.
         self.render(
             force=True
         )
+
+        final_line = self._build_line()
 
         # Restore the terminal's normal full-screen scrolling region.
         sys.stdout.write(
             "\033[r"
         )
 
-        # Move beneath the progress display and clear the current line.
+        # Move to the final row and replace the reserved display with a normal
+        # persistent final progress line.
         sys.stdout.write(
             f"\033[{self.rows};1H"
         )
@@ -650,14 +651,17 @@ class TerminalProgressBar:
             "\033[2K"
         )
 
-        # Print the final progress state normally so it remains visible after
-        # the reserved-row mode has ended.
         sys.stdout.write(
-            self._build_line()
-            + "\n"
+            final_line
+        )
+
+        sys.stdout.write(
+            "\n"
         )
 
         sys.stdout.flush()
+
+        self._closed = True
 
 
 # ---------------------------------------------------------------------------
@@ -763,9 +767,7 @@ def _resolve_idd_path(
     synthetic_homes_root: Path,
     synthetic_homes_src: Path,
 ) -> Path:
-    """
-    Resolve Synthetic Homes' configured EnergyPlus IDD path.
-    """
+    """Resolve Synthetic Homes' configured EnergyPlus IDD path."""
     raw_path = Path(
         raw_idd_path
     ).expanduser()
@@ -993,9 +995,7 @@ def _initialize_worker(
     synthetic_homes_root: str,
     idd_path: str,
 ) -> None:
-    """
-    Initialize one EnergyPlus worker process.
-    """
+    """Initialize EnergyPlus/Synthetic Homes state in the current process."""
     global _WORKER_GENERATE_IDF
     global _WORKER_PIPELINE_DIR
 
@@ -1045,6 +1045,54 @@ def _initialize_worker(
             raise
 
 
+def _silence_worker_terminal_output() -> None:
+    """
+    Permanently redirect a ProcessPool worker's stdout and stderr to /dev/null.
+
+    Redirecting the operating-system file descriptors, rather than only
+    Python's sys.stdout/sys.stderr objects, also suppresses output produced by
+    native libraries and subprocesses that inherit those descriptors.
+
+    ProcessPool result communication does not use stdout or stderr, so normal
+    future/result handling is unaffected.
+    """
+    devnull_fd = os.open(
+        os.devnull,
+        os.O_WRONLY,
+    )
+
+    try:
+        os.dup2(
+            devnull_fd,
+            1,
+        )
+
+        os.dup2(
+            devnull_fd,
+            2,
+        )
+
+    finally:
+        os.close(
+            devnull_fd
+        )
+
+
+def _initialize_worker_process(
+    synthetic_homes_root: str,
+    idd_path: str,
+) -> None:
+    """
+    Initialize a ProcessPool worker without allowing it to write to the TTY.
+    """
+    _silence_worker_terminal_output()
+
+    _initialize_worker(
+        synthetic_homes_root,
+        idd_path,
+    )
+
+
 # ---------------------------------------------------------------------------
 # EnergyPlus result extraction
 # ---------------------------------------------------------------------------
@@ -1090,34 +1138,24 @@ def _summarize_eplusout_csv(
         if numeric.empty:
             continue
 
-        values = (
-            numeric.to_numpy(
-                dtype=float
-            )
+        values = numeric.to_numpy(
+            dtype=float
         )
 
         summary[
             column_name
         ] = {
             "min": float(
-                np.min(
-                    values
-                )
+                np.min(values)
             ),
             "max": float(
-                np.max(
-                    values
-                )
+                np.max(values)
             ),
             "mean": float(
-                np.mean(
-                    values
-                )
+                np.mean(values)
             ),
             "std": float(
-                np.std(
-                    values
-                )
+                np.std(values)
             ),
         }
 
@@ -1134,9 +1172,7 @@ def _read_text_tail(
     path: Path,
     max_chars: int = 20000,
 ) -> str:
-    """
-    Read the end of a diagnostic text file without retaining the whole file.
-    """
+    """Read the end of a diagnostic text file."""
     if not path.exists():
         return ""
 
@@ -1181,9 +1217,7 @@ def _build_geojson(
                     "Total Square Feet Living Area": 1000,
                     "height_ft": 10,
                     "conditioned": True,
-                    **dict(
-                        params
-                    ),
+                    **dict(params),
                 },
             }
         ],
@@ -1204,8 +1238,8 @@ def _run_energyplus_job(
     """
     Generate, simulate, summarize, checkpoint, and optionally clean one job.
 
-    Worker output is suppressed so only the parent process controls the terminal
-    progress display.
+    ProcessPool workers are silenced at the operating-system descriptor level,
+    so only the parent process controls the terminal.
 
     The checkpoint is written before raw EnergyPlus files are removed.
     """
@@ -1249,7 +1283,7 @@ def _run_energyplus_job(
     succeeded = False
 
     try:
-        # A working directory without a successful checkpoint is disposable.
+        # A work directory without a successful checkpoint is disposable.
         if sim_dir.exists():
             shutil.rmtree(
                 sim_dir
@@ -1267,9 +1301,7 @@ def _run_energyplus_job(
 
         # Preserve compatibility with Synthetic Homes code that may assume
         # execution from its src/pipeline directory.
-        original_cwd = (
-            Path.cwd()
-        )
+        original_cwd = Path.cwd()
 
         try:
             if _WORKER_PIPELINE_DIR is not None:
@@ -1277,15 +1309,14 @@ def _run_energyplus_job(
                     _WORKER_PIPELINE_DIR
                 )
 
-            geojson = (
-                _build_geojson(
-                    job.name,
-                    job.params,
-                )
+            geojson = _build_geojson(
+                job.name,
+                job.params,
             )
 
-            # Suppress any ordinary status output emitted by Synthetic Homes.
-            # Exceptions are still caught and recorded below.
+            # This suppresses Python-level output in the max_workers=1 case.
+            # ProcessPool workers are additionally silenced at the OS file-
+            # descriptor level by _initialize_worker_process().
             with open(
                 os.devnull,
                 "w",
@@ -1298,9 +1329,7 @@ def _run_energyplus_job(
                 ):
                     _WORKER_GENERATE_IDF(
                         geojson,
-                        str(
-                            idf_path
-                        ),
+                        str(idf_path),
                     )
 
         finally:
@@ -1473,9 +1502,7 @@ def _load_successful_checkpoint_names(
     checkpoint_dir: Path,
 ) -> set[str]:
     """Return simulation names with valid successful checkpoints."""
-    completed: set[
-        str
-    ] = set()
+    completed: set[str] = set()
 
     if not checkpoint_dir.is_dir():
         return completed
@@ -1484,11 +1511,9 @@ def _load_successful_checkpoint_names(
         "cal_*.json"
     ):
         try:
-            record = (
-                _read_json_if_exists(
-                    path,
-                    {},
-                )
+            record = _read_json_if_exists(
+                path,
+                {},
             )
 
         except (
@@ -1498,22 +1523,13 @@ def _load_successful_checkpoint_names(
             continue
 
         if (
-            isinstance(
-                record,
-                dict,
-            )
-            and record.get(
-                "succeeded"
-            ) is True
+            isinstance(record, dict)
+            and record.get("succeeded") is True
             and isinstance(
-                record.get(
-                    "summary_stats"
-                ),
+                record.get("summary_stats"),
                 dict,
             )
-            and record[
-                "summary_stats"
-            ]
+            and record["summary_stats"]
         ):
             name = record.get(
                 "simulation_name"
@@ -1521,9 +1537,7 @@ def _load_successful_checkpoint_names(
 
             if name is not None:
                 completed.add(
-                    str(
-                        name
-                    )
+                    str(name)
                 )
 
     return completed
@@ -1532,9 +1546,7 @@ def _load_successful_checkpoint_names(
 def _load_successful_aggregate_names(
     data_dir: Path,
 ) -> set[str]:
-    """
-    Return simulations known to be successful in existing aggregate files.
-    """
+    """Return simulations known to be successful in aggregate files."""
     summary_path = (
         data_dir
         / "summary_stats.json"
@@ -1545,18 +1557,14 @@ def _load_successful_aggregate_names(
         / "calibration_runtime.json"
     )
 
-    summary = (
-        _read_json_if_exists(
-            summary_path,
-            {},
-        )
+    summary = _read_json_if_exists(
+        summary_path,
+        {},
     )
 
-    runtime = (
-        _read_json_if_exists(
-            runtime_path,
-            {},
-        )
+    runtime = _read_json_if_exists(
+        runtime_path,
+        {},
     )
 
     if not isinstance(
@@ -1600,9 +1608,7 @@ def _load_successful_aggregate_names(
             and name in summary
         ):
             completed.add(
-                str(
-                    name
-                )
+                str(name)
             )
 
     return completed
@@ -1648,18 +1654,14 @@ def _aggregate_results(
         / "calibration_runtime.json"
     )
 
-    summary_stats = (
-        _read_json_if_exists(
-            summary_path,
-            {},
-        )
+    summary_stats = _read_json_if_exists(
+        summary_path,
+        {},
     )
 
-    runtime_payload = (
-        _read_json_if_exists(
-            runtime_path,
-            {},
-        )
+    runtime_payload = _read_json_if_exists(
+        runtime_path,
+        {},
     )
 
     if not isinstance(
@@ -1674,11 +1676,9 @@ def _aggregate_results(
     ):
         runtime_payload = {}
 
-    runtime_jobs = (
-        runtime_payload.get(
-            "jobs",
-            {},
-        )
+    runtime_jobs = runtime_payload.get(
+        "jobs",
+        {},
     )
 
     if not isinstance(
@@ -1694,11 +1694,9 @@ def _aggregate_results(
             )
         ):
             try:
-                record = (
-                    _read_json_if_exists(
-                        checkpoint_path,
-                        {},
-                    )
+                record = _read_json_if_exists(
+                    checkpoint_path,
+                    {},
                 )
 
             except (
@@ -1724,9 +1722,7 @@ def _aggregate_results(
             if name is None:
                 continue
 
-            name = str(
-                name
-            )
+            name = str(name)
 
             succeeded = bool(
                 record.get(
@@ -1885,32 +1881,44 @@ def _run_energyplus_batch(
     idd_path: Path,
     max_workers: int,
     keep_simulation_files: bool,
+    total_jobs: int,
+    initial_completed: int = 0,
 ) -> tuple[int, int]:
     """
     Run pending EnergyPlus calibration jobs.
 
-    A dependency-free persistent terminal progress bar is maintained throughout
-    execution. Failures are printed above the bar.
+    The parent process exclusively owns terminal output. ProcessPool workers
+    have stdout and stderr redirected to /dev/null before Synthetic Homes is
+    imported.
+
+    The progress bar represents the entire calibration grid, including
+    simulations completed before a --resume invocation.
     """
     if max_workers < 1:
         raise ValueError(
             "max_workers must be at least 1."
         )
 
-    total = len(
+    pending_count = len(
         jobs
     )
 
     print()
     print(
-        f"EnergyPlus jobs to run: {total}"
+        f"EnergyPlus jobs to run: {pending_count}"
     )
     print(
         f"Worker processes:       {max_workers}"
     )
+
+    if initial_completed:
+        print(
+            f"Already completed:       {initial_completed}"
+        )
+
     print()
 
-    if total == 0:
+    if pending_count == 0:
         print(
             "No EnergyPlus jobs need to be run."
         )
@@ -1924,12 +1932,16 @@ def _run_energyplus_batch(
     failed = 0
 
     progress = TerminalProgressBar(
-        total=total,
+        total=total_jobs,
         description="Calibration grid",
+        initial=initial_completed,
+        render_interval=0.20,
     )
 
     try:
         if max_workers == 1:
+            # This runs in the parent process, so do NOT use the permanently
+            # silent ProcessPool initializer.
             _initialize_worker(
                 str(
                     synthetic_homes_root
@@ -1943,7 +1955,7 @@ def _run_energyplus_batch(
                 (
                     name,
                     succeeded,
-                    runtime_seconds,
+                    _runtime_seconds,
                     message,
                 ) = _run_energyplus_job(
                     job,
@@ -1959,7 +1971,6 @@ def _run_energyplus_batch(
 
                 if succeeded:
                     successful += 1
-
                 else:
                     failed += 1
 
@@ -1978,7 +1989,7 @@ def _run_energyplus_batch(
 
         executor = ProcessPoolExecutor(
             max_workers=max_workers,
-            initializer=_initialize_worker,
+            initializer=_initialize_worker_process,
             initargs=(
                 str(
                     synthetic_homes_root
@@ -2017,13 +2028,12 @@ def _run_energyplus_batch(
                     (
                         _,
                         succeeded,
-                        runtime_seconds,
+                        _runtime_seconds,
                         message,
                     ) = future.result()
 
                 except Exception as exc:
                     succeeded = False
-                    runtime_seconds = 0.0
 
                     message = (
                         f"{type(exc).__name__}: {exc}"
@@ -2046,7 +2056,6 @@ def _run_energyplus_batch(
 
                 if succeeded:
                     successful += 1
-
                 else:
                     failed += 1
 
@@ -2138,10 +2147,8 @@ def generate(
             f"  {epw_path}"
         )
 
-    output_dir = (
-        _resolve_output_dir(
-            output_dir
-        )
+    output_dir = _resolve_output_dir(
+        output_dir
     )
 
     data_dir = (
@@ -2239,10 +2246,8 @@ def generate(
         "hvac_system_type": "gas_furnace",
     }
 
-    levels = (
-        build_parameter_levels(
-            k
-        )
+    levels = build_parameter_levels(
+        k
     )
 
     keys = list(
@@ -2250,10 +2255,7 @@ def generate(
     )
 
     total_combinations = (
-        k
-        ** len(
-            keys
-        )
+        k ** len(keys)
     )
 
     name_width = max(
@@ -2264,6 +2266,60 @@ def generate(
             )
         ),
     )
+
+    # Detect existing successful work BEFORE overwriting experiment metadata.
+    existing_results = _completed_job_names(
+        data_dir,
+        checkpoint_dir,
+    )
+
+    if (
+        existing_results
+        and not resume
+    ):
+        raise RuntimeError(
+            "This output directory already contains completed calibration "
+            "jobs.\n\n"
+            f"  {output_dir}\n\n"
+            "Use --resume to continue the existing experiment, or choose "
+            "a different --output-dir."
+        )
+
+    calibration_levels_path = (
+        data_dir
+        / "calibration_levels.json"
+    )
+
+    if (
+        resume
+        and calibration_levels_path.exists()
+    ):
+        existing_levels = _read_json_if_exists(
+            calibration_levels_path,
+            {},
+        )
+
+        existing_k = (
+            existing_levels.get(
+                "max_k"
+            )
+            if isinstance(
+                existing_levels,
+                dict,
+            )
+            else None
+        )
+
+        if (
+            existing_k is not None
+            and int(existing_k) != k
+        ):
+            raise RuntimeError(
+                "Cannot resume this output directory with a different "
+                "calibration resolution.\n\n"
+                f"Existing k: {existing_k}\n"
+                f"Requested k: {k}\n"
+            )
 
     meta: dict[
         str,
@@ -2284,21 +2340,13 @@ def generate(
         level_indices,
     ) in enumerate(
         product(
-            range(
-                k
-            ),
-            repeat=len(
-                keys
-            ),
+            range(k),
+            repeat=len(keys),
         ),
         1,
     ):
         values = tuple(
-            levels[
-                key
-            ][
-                index
-            ]
+            levels[key][index]
             for key, index
             in zip(
                 keys,
@@ -2369,11 +2417,6 @@ def generate(
         / "calibration_meta.json"
     )
 
-    calibration_levels_path = (
-        data_dir
-        / "calibration_levels.json"
-    )
-
     _write_json(
         calibration_meta_path,
         meta,
@@ -2384,9 +2427,7 @@ def generate(
         {
             "max_k": k,
             "parameter_levels": {
-                key: list(
-                    values
-                )
+                key: list(values)
                 for key, values
                 in levels.items()
             },
@@ -2400,24 +2441,17 @@ def generate(
         f"Wrote: {calibration_levels_path}"
     )
 
-    existing_results = (
-        _completed_job_names(
-            data_dir,
-            checkpoint_dir,
-        )
-    )
+    expected_names = {
+        job.name
+        for job
+        in jobs
+    }
 
-    if (
+    # Ignore any unrelated names that might somehow exist in the directory.
+    existing_results = (
         existing_results
-        and not resume
-    ):
-        raise RuntimeError(
-            "This output directory already contains completed calibration "
-            "jobs.\n\n"
-            f"  {output_dir}\n\n"
-            "Use --resume to continue the existing experiment, or choose "
-            "a different --output-dir."
-        )
+        & expected_names
+    )
 
     if resume:
         pending_jobs = [
@@ -2446,15 +2480,17 @@ def generate(
             newly_failed,
         ) = _run_energyplus_batch(
             pending_jobs,
-            str(
-                epw_path
-            ),
+            str(epw_path),
             work_dir,
             checkpoint_dir,
             synthetic_homes_root,
             idd_path,
             max_workers,
             keep_simulation_files,
+            total_jobs=total_combinations,
+            initial_completed=len(
+                existing_results
+            ),
         )
 
     except BaseException:
@@ -2497,13 +2533,8 @@ def generate(
             data_dir,
             checkpoint_dir,
         )
+        & expected_names
     )
-
-    expected_names = {
-        job.name
-        for job
-        in jobs
-    }
 
     missing_names = (
         expected_names
@@ -2515,8 +2546,8 @@ def generate(
         and successful_jobs
         >= total_combinations
     ):
-        # Once the final aggregate files contain every successful job, the
-        # individual checkpoints are no longer needed for resume.
+        # Once the aggregate files contain every successful job, individual
+        # checkpoints are no longer required for resume.
         shutil.rmtree(
             checkpoint_dir,
             ignore_errors=True,
@@ -2719,14 +2750,10 @@ Examples:
         ),
     )
 
-    args = (
-        parser.parse_args()
-    )
+    args = parser.parse_args()
 
-    output_dir = (
-        _resolve_output_dir(
-            args.output_dir
-        )
+    output_dir = _resolve_output_dir(
+        args.output_dir
     )
 
     data_dir = (
