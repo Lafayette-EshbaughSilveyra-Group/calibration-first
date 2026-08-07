@@ -1,0 +1,179 @@
+{
+  "proposition_1": {
+    "description": "Every pairwise raw scorer ordering is preserved after standardization.",
+    "calibration_space_checks": {
+      "text_hvac": {
+        "comparisons": 195000,
+        "failures": 0,
+        "passed": true
+      },
+      "text_insulation": {
+        "comparisons": 195000,
+        "failures": 0,
+        "passed": true
+      },
+      "structured_hvac": {
+        "comparisons": 195000,
+        "failures": 0,
+        "passed": true
+      },
+      "structured_insulation": {
+        "comparisons": 195000,
+        "failures": 0,
+        "passed": true
+      }
+    },
+    "passed": true
+  },
+  "ablation": {
+    "text_hvac": {
+      "scorer_channel": "text_hvac",
+      "fused_column": "kappa_hvac",
+      "proposition_1": {
+        "comparisons": 10,
+        "failures": 0,
+        "passed": true
+      },
+      "raw_scorer_monotone_with_efficiency": true,
+      "calibrated_scorer_monotone_with_efficiency": true,
+      "concept_fusion_monotone_with_efficiency": true,
+      "raw_values": [
+        1.0,
+        0.6,
+        0.5,
+        0.0,
+        0.0
+      ],
+      "calibrated_values": [
+        2.1974820554961125,
+        0.859186041186665,
+        0.5246120376093033,
+        -1.1482579802775057,
+        -1.1482579802775057
+      ],
+      "concept_kappa_values": [
+        1.0987410277480563,
+        0.4295930205933325,
+        0.26230601880465165,
+        -0.5741289901387528,
+        -0.5741289901387528
+      ]
+    },
+    "text_insulation": {
+      "scorer_channel": "text_insulation",
+      "fused_column": "kappa_insulation",
+      "proposition_1": {
+        "comparisons": 10,
+        "failures": 0,
+        "passed": true
+      },
+      "raw_scorer_monotone_with_efficiency": true,
+      "calibrated_scorer_monotone_with_efficiency": true,
+      "concept_fusion_monotone_with_efficiency": true,
+      "raw_values": [
+        1.0,
+        1.0,
+        0.3,
+        0.2,
+        0.0
+      ],
+      "calibrated_values": [
+        1.8799580525781756,
+        1.8799580525781756,
+        -0.17676024700409954,
+        -0.4705771469444245,
+        -1.0582109468250747
+      ],
+      "concept_kappa_values": [
+        0.9399790262890878,
+        0.9399790262890878,
+        -0.08838012350204977,
+        -0.23528857347221224,
+        -0.5291054734125373
+      ]
+    },
+    "structured_hvac": {
+      "scorer_channel": "structured_hvac",
+      "fused_column": "kappa_hvac",
+      "proposition_1": {
+        "comparisons": 10,
+        "failures": 0,
+        "passed": true
+      },
+      "raw_scorer_monotone_with_efficiency": true,
+      "calibrated_scorer_monotone_with_efficiency": true,
+      "concept_fusion_monotone_with_efficiency": true,
+      "raw_values": [
+        5.0,
+        4.0,
+        3.0,
+        2.0,
+        1.0
+      ],
+      "calibrated_values": [
+        2.0,
+        1.0,
+        0.0,
+        -1.0,
+        -2.0
+      ],
+      "concept_kappa_values": [
+        1.2623060188046518,
+        0.7623060188046517,
+        0.26230601880465165,
+        -0.23769398119534835,
+        -0.7376939811953483
+      ]
+    },
+    "structured_insulation": {
+      "scorer_channel": "structured_insulation",
+      "fused_column": "kappa_insulation",
+      "proposition_1": {
+        "comparisons": 10,
+        "failures": 0,
+        "passed": true
+      },
+      "raw_scorer_monotone_with_efficiency": true,
+      "calibrated_scorer_monotone_with_efficiency": true,
+      "concept_fusion_monotone_with_efficiency": true,
+      "raw_values": [
+        5.0,
+        4.0,
+        3.0,
+        2.0,
+        1.0
+      ],
+      "calibrated_values": [
+        2.0,
+        1.0,
+        0.0,
+        -1.0,
+        -2.0
+      ],
+      "concept_kappa_values": [
+        0.9116198764979502,
+        0.41161987649795023,
+        -0.08838012350204977,
+        -0.5883801235020498,
+        -1.0883801235020498
+      ]
+    }
+  },
+  "proposition_2": {
+    "description": "Fused ordering matches the balance of positive and negative calibrated support.",
+    "combined_variation_checks": {
+      "hvac": {
+        "comparisons": 300,
+        "failures": 0,
+        "passed": true
+      },
+      "insulation": {
+        "comparisons": 300,
+        "failures": 0,
+        "passed": true
+      }
+    },
+    "passed": true
+  },
+  "all_proposition_checks_passed": true
+}

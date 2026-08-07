@@ -1,0 +1,28 @@
+{
+  "framework_unit": "evidence-channel scorer",
+  "score_direction": "larger values indicate greater retrofit need",
+  "calibration_cardinality": 625,
+  "distinct_whole_home_notes_scored": 25,
+  "channels": {
+    "text_hvac": {
+      "mean": 0.3432,
+      "std": 0.2988875373781918,
+      "n": 625
+    },
+    "text_insulation": {
+      "mean": 0.36016,
+      "std": 0.3403480195329481,
+      "n": 625
+    },
+    "structured_hvac": {
+      "mean": 3.0,
+      "std": 1.0,
+      "n": 625
+    },
+    "structured_insulation": {
+      "mean": 3.0,
+      "std": 1.0,
+      "n": 625
+    }
+  }
+}
