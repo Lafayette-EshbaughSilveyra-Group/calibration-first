@@ -87,11 +87,6 @@ Resolution & Selected levels \\
             max_k,
         )
 
-        selected = [
-            x + 1
-            for x in selected
-        ]
-
         lines.append(
             f"$k={k}$ & "
             + ", ".join(
@@ -173,6 +168,11 @@ Level & Wall $R$ & Roof $R$ & Heating COP & Cooling COP \\
 
 
 def main():
+
+    OUTPUT_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     with LEVEL_FILE.open(
         "r",
