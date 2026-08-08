@@ -1,0 +1,465 @@
+{
+  "level_sets": {
+    "k11": [
+      1,
+      2,
+      4,
+      5,
+      7,
+      8,
+      9,
+      11,
+      12,
+      14,
+      15
+    ],
+    "k13": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      7,
+      8,
+      9,
+      10,
+      12,
+      13,
+      14,
+      15
+    ],
+    "k15": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15
+    ],
+    "k2": [
+      1,
+      15
+    ],
+    "k3": [
+      1,
+      8,
+      15
+    ],
+    "k5": [
+      1,
+      4,
+      8,
+      12,
+      15
+    ],
+    "k7": [
+      1,
+      3,
+      6,
+      8,
+      10,
+      13,
+      15
+    ],
+    "k9": [
+      1,
+      3,
+      4,
+      6,
+      8,
+      10,
+      12,
+      13,
+      15
+    ]
+  },
+  "max_k": 15,
+  "num_target_examples": 50625,
+  "parameter_levels": {
+    "hvac_cooling_cop": [
+      1.0,
+      1.3333,
+      1.6667,
+      2.0,
+      2.25,
+      2.5,
+      2.75,
+      3.0,
+      3.125,
+      3.25,
+      3.375,
+      3.5,
+      3.6667,
+      3.8333,
+      4.0
+    ],
+    "hvac_heating_cop": [
+      0.7,
+      0.7333,
+      0.7667,
+      0.8,
+      0.825,
+      0.85,
+      0.875,
+      0.9,
+      0.9125,
+      0.925,
+      0.9375,
+      0.95,
+      0.9667,
+      0.9833,
+      1.0
+    ],
+    "roof_r_value": [
+      10.0,
+      13.333,
+      16.667,
+      20.0,
+      22.5,
+      25.0,
+      27.5,
+      30.0,
+      32.5,
+      35.0,
+      37.5,
+      40.0,
+      43.333,
+      46.667,
+      50.0
+    ],
+    "wall_r_value": [
+      4.0,
+      5.0,
+      6.0,
+      7.0,
+      8.5,
+      10.0,
+      11.5,
+      13.0,
+      14.75,
+      16.5,
+      18.25,
+      20.0,
+      23.333,
+      26.667,
+      30.0
+    ]
+  },
+  "reference_resolution": "k15",
+  "runtime_notes": {
+    "analysis_wall_time_seconds": "Measured in-process wall time for constructing both calibration scalers and labeling the common target set at each resolution.",
+    "energyplus_compute_seconds": "Sum of measured per-job EnergyPlus runtimes for the exact simulations included in each k-grid. This is cumulative compute time, not parallel batch wall time."
+  },
+  "scalers": {
+    "k11": {
+      "hvac": {
+        "sim_mean": 112488.694858866,
+        "sim_std": 73347.267883177,
+        "text_mean": 0.5,
+        "text_std": 0.22690136635917077
+      },
+      "insulation": {
+        "sim_mean": 966633.0343094064,
+        "sim_std": 782098.3433305928,
+        "text_mean": 0.5,
+        "text_std": 0.22690136635917077
+      }
+    },
+    "k13": {
+      "hvac": {
+        "sim_mean": 111363.71177601161,
+        "sim_std": 70549.32671912765,
+        "text_mean": 0.5,
+        "text_std": 0.22674406903256428
+      },
+      "insulation": {
+        "sim_mean": 960617.7861330453,
+        "sim_std": 770670.1072073859,
+        "text_mean": 0.5,
+        "text_std": 0.22674406903256428
+      }
+    },
+    "k15": {
+      "hvac": {
+        "sim_mean": 107589.50623414939,
+        "sim_std": 65551.56751019813,
+        "text_mean": 0.5,
+        "text_std": 0.2182178902359924
+      },
+      "insulation": {
+        "sim_mean": 931149.3059312019,
+        "sim_std": 734353.9131122308,
+        "text_mean": 0.5,
+        "text_std": 0.2182178902359924
+      }
+    },
+    "k2": {
+      "hvac": {
+        "sim_mean": 202157.47191268054,
+        "sim_std": 162931.8649816977,
+        "text_mean": 0.5,
+        "text_std": 0.3535533905932738
+      },
+      "insulation": {
+        "sim_mean": 1561771.6377237474,
+        "sim_std": 1238941.0928965134,
+        "text_mean": 0.5,
+        "text_std": 0.3535533905932738
+      }
+    },
+    "k3": {
+      "hvac": {
+        "sim_mean": 153123.30081149645,
+        "sim_std": 125256.48559061353,
+        "text_mean": 0.5,
+        "text_std": 0.28867513459481287
+      },
+      "insulation": {
+        "sim_mean": 1244065.0773421691,
+        "sim_std": 1072240.543212564,
+        "text_mean": 0.5,
+        "text_std": 0.28867513459481287
+      }
+    },
+    "k5": {
+      "hvac": {
+        "sim_mean": 129730.2449094699,
+        "sim_std": 95990.59045689886,
+        "text_mean": 0.5,
+        "text_std": 0.25753937681885636
+      },
+      "insulation": {
+        "sim_mean": 1093516.9448751442,
+        "sim_std": 916814.6438749871,
+        "text_mean": 0.5,
+        "text_std": 0.25753937681885636
+      }
+    },
+    "k7": {
+      "hvac": {
+        "sim_mean": 118224.54341962576,
+        "sim_std": 82360.12733172339,
+        "text_mean": 0.5,
+        "text_std": 0.23843513154179433
+      },
+      "insulation": {
+        "sim_mean": 1008747.0555790473,
+        "sim_std": 841228.4050450564,
+        "text_mean": 0.5,
+        "text_std": 0.23843513154179433
+      }
+    },
+    "k9": {
+      "hvac": {
+        "sim_mean": 113550.0018525046,
+        "sim_std": 74100.07689257943,
+        "text_mean": 0.5,
+        "text_std": 0.23084189797220614
+      },
+      "insulation": {
+        "sim_mean": 977784.5829635081,
+        "sim_std": 790432.4978517977,
+        "text_mean": 0.5,
+        "text_std": 0.23084189797220614
+      }
+    }
+  },
+  "summary": [
+    {
+      "analysis_wall_time_seconds": 0.5711085320072016,
+      "calibration_resolution": "k2",
+      "energyplus_compute_seconds": 22.44509273400763,
+      "expected_simulation_jobs": 16,
+      "fraction_of_reference_grid": 0.0003160493827160494,
+      "is_reference": false,
+      "max_abs_diff_vs_reference": 0.21097061063471778,
+      "mean_abs_diff_vs_reference": 0.0660965589285474,
+      "mean_energyplus_seconds_per_job": 1.402818295875477,
+      "num_calibration_points": 16,
+      "num_target_examples": 50625,
+      "reference_resolution": "k15",
+      "runtime_measurement_coverage": 1.0,
+      "scaler_build_wall_time_seconds": 0.00034226500429213047,
+      "spearman_vs_reference": 0.9632776368660517,
+      "successful_simulation_jobs": 16,
+      "target_labeling_wall_time_seconds": 0.5707662670029094,
+      "timed_simulation_jobs": 16,
+      "top_10_percent_overlap_vs_reference": 0.7967608137467904,
+      "top_20_percent_overlap_vs_reference": 0.8313086419753086
+    },
+    {
+      "analysis_wall_time_seconds": 0.6326271580037428,
+      "calibration_resolution": "k3",
+      "energyplus_compute_seconds": 113.97794326202711,
+      "expected_simulation_jobs": 81,
+      "fraction_of_reference_grid": 0.0016000000000000003,
+      "is_reference": false,
+      "max_abs_diff_vs_reference": 0.16016156271639548,
+      "mean_abs_diff_vs_reference": 0.03947163631674429,
+      "mean_energyplus_seconds_per_job": 1.4071351020003346,
+      "num_calibration_points": 81,
+      "num_target_examples": 50625,
+      "reference_resolution": "k15",
+      "runtime_measurement_coverage": 1.0,
+      "scaler_build_wall_time_seconds": 0.0005563080048887059,
+      "spearman_vs_reference": 0.9635717696929147,
+      "successful_simulation_jobs": 81,
+      "target_labeling_wall_time_seconds": 0.6320708499988541,
+      "timed_simulation_jobs": 81,
+      "top_10_percent_overlap_vs_reference": 0.7953782342484693,
+      "top_20_percent_overlap_vs_reference": 0.8261728395061728
+    },
+    {
+      "analysis_wall_time_seconds": 0.5841198580019409,
+      "calibration_resolution": "k5",
+      "energyplus_compute_seconds": 876.3638497818902,
+      "expected_simulation_jobs": 625,
+      "fraction_of_reference_grid": 0.012345679012345677,
+      "is_reference": false,
+      "max_abs_diff_vs_reference": 0.09808811029220499,
+      "mean_abs_diff_vs_reference": 0.02434325178031661,
+      "mean_energyplus_seconds_per_job": 1.4021821596510242,
+      "num_calibration_points": 625,
+      "num_target_examples": 50625,
+      "reference_resolution": "k15",
+      "runtime_measurement_coverage": 1.0,
+      "scaler_build_wall_time_seconds": 0.002958648998173885,
+      "spearman_vs_reference": 0.9870540008613153,
+      "successful_simulation_jobs": 625,
+      "target_labeling_wall_time_seconds": 0.581161209003767,
+      "timed_simulation_jobs": 625,
+      "top_10_percent_overlap_vs_reference": 0.8856409243531503,
+      "top_20_percent_overlap_vs_reference": 0.8981728395061729
+    },
+    {
+      "analysis_wall_time_seconds": 0.6631091080053011,
+      "calibration_resolution": "k7",
+      "energyplus_compute_seconds": 3373.858171851971,
+      "expected_simulation_jobs": 2401,
+      "fraction_of_reference_grid": 0.04742716049382716,
+      "is_reference": false,
+      "max_abs_diff_vs_reference": 0.060604280063442206,
+      "mean_abs_diff_vs_reference": 0.013278025581394428,
+      "mean_energyplus_seconds_per_job": 1.405188742962087,
+      "num_calibration_points": 2401,
+      "num_target_examples": 50625,
+      "reference_resolution": "k15",
+      "runtime_measurement_coverage": 1.0,
+      "scaler_build_wall_time_seconds": 0.010727187007432804,
+      "spearman_vs_reference": 0.9938812540407957,
+      "successful_simulation_jobs": 2401,
+      "target_labeling_wall_time_seconds": 0.6523819209978683,
+      "timed_simulation_jobs": 2401,
+      "top_10_percent_overlap_vs_reference": 0.9241556389492396,
+      "top_20_percent_overlap_vs_reference": 0.9294814814814815
+    },
+    {
+      "analysis_wall_time_seconds": 0.608707974999561,
+      "calibration_resolution": "k9",
+      "energyplus_compute_seconds": 9224.145161364213,
+      "expected_simulation_jobs": 6561,
+      "fraction_of_reference_grid": 0.1296,
+      "is_reference": false,
+      "max_abs_diff_vs_reference": 0.033137668658488884,
+      "mean_abs_diff_vs_reference": 0.008224900158279596,
+      "mean_energyplus_seconds_per_job": 1.4059053743886927,
+      "num_calibration_points": 6561,
+      "num_target_examples": 50625,
+      "reference_resolution": "k15",
+      "runtime_measurement_coverage": 1.0,
+      "scaler_build_wall_time_seconds": 0.027988995992927812,
+      "spearman_vs_reference": 0.9987400180956044,
+      "successful_simulation_jobs": 6561,
+      "target_labeling_wall_time_seconds": 0.5807189790066332,
+      "timed_simulation_jobs": 6561,
+      "top_10_percent_overlap_vs_reference": 0.9666205806833893,
+      "top_20_percent_overlap_vs_reference": 0.9695802469135802
+    },
+    {
+      "analysis_wall_time_seconds": 0.7358996380062308,
+      "calibration_resolution": "k11",
+      "energyplus_compute_seconds": 20589.702613381116,
+      "expected_simulation_jobs": 14641,
+      "fraction_of_reference_grid": 0.28920493827160487,
+      "is_reference": false,
+      "max_abs_diff_vs_reference": 0.030721389600813165,
+      "mean_abs_diff_vs_reference": 0.0066672409813514424,
+      "mean_energyplus_seconds_per_job": 1.4063043926904661,
+      "num_calibration_points": 14641,
+      "num_target_examples": 50625,
+      "reference_resolution": "k15",
+      "runtime_measurement_coverage": 1.0,
+      "scaler_build_wall_time_seconds": 0.060963751006056555,
+      "spearman_vs_reference": 0.9983249223749189,
+      "successful_simulation_jobs": 14641,
+      "target_labeling_wall_time_seconds": 0.6749358870001743,
+      "timed_simulation_jobs": 14641,
+      "top_10_percent_overlap_vs_reference": 0.9618803081177167,
+      "top_20_percent_overlap_vs_reference": 0.9646419753086419
+    },
+    {
+      "analysis_wall_time_seconds": 0.6953961399849504,
+      "calibration_resolution": "k13",
+      "energyplus_compute_seconds": 40154.599687489565,
+      "expected_simulation_jobs": 28561,
+      "fraction_of_reference_grid": 0.564167901234568,
+      "is_reference": false,
+      "max_abs_diff_vs_reference": 0.020226377927207717,
+      "mean_abs_diff_vs_reference": 0.005397374730593247,
+      "mean_energyplus_seconds_per_job": 1.4059241513773875,
+      "num_calibration_points": 28561,
+      "num_target_examples": 50625,
+      "reference_resolution": "k15",
+      "runtime_measurement_coverage": 1.0,
+      "scaler_build_wall_time_seconds": 0.11364186099672224,
+      "spearman_vs_reference": 0.9996354918823966,
+      "successful_simulation_jobs": 28561,
+      "target_labeling_wall_time_seconds": 0.5817542789882282,
+      "timed_simulation_jobs": 28561,
+      "top_10_percent_overlap_vs_reference": 0.9822239778787281,
+      "top_20_percent_overlap_vs_reference": 0.9847901234567902
+    },
+    {
+      "analysis_wall_time_seconds": 0.7839276119921124,
+      "calibration_resolution": "k15",
+      "energyplus_compute_seconds": 71140.03681478233,
+      "expected_simulation_jobs": 50625,
+      "fraction_of_reference_grid": 1.0,
+      "is_reference": true,
+      "max_abs_diff_vs_reference": 0.0,
+      "mean_abs_diff_vs_reference": 0.0,
+      "mean_energyplus_seconds_per_job": 1.4052352951068114,
+      "num_calibration_points": 50625,
+      "num_target_examples": 50625,
+      "reference_resolution": "k15",
+      "runtime_measurement_coverage": 1.0,
+      "scaler_build_wall_time_seconds": 0.19956635498965625,
+      "spearman_vs_reference": 1.0000000000000002,
+      "successful_simulation_jobs": 50625,
+      "target_labeling_wall_time_seconds": 0.5843612570024561,
+      "timed_simulation_jobs": 50625,
+      "top_10_percent_overlap_vs_reference": 1.0,
+      "top_20_percent_overlap_vs_reference": 1.0
+    }
+  ],
+  "target_source": "calibration_grid_fallback",
+  "tested_k_values": [
+    2,
+    3,
+    5,
+    7,
+    9,
+    11,
+    13,
+    15
+  ]
+}
