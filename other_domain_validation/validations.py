@@ -1,29 +1,14 @@
 """
 Cross-domain validation experiments for Align Before You Combine.
 
-This script evaluates calibration-first supervision construction on two labeled
+This script evaluates calibration-first supervision construction on three labeled
 benchmark datasets while withholding labels during supervision construction:
 
 1. Ames Housing / OpenML house_prices
 2. Breast Cancer Wisconsin / sklearn breast_cancer
+3. UCI Wine Quality (Red) / OpenML wine-quality-red
 
 Labels are used only after kappa has been constructed, for external validation.
-
-The script saves:
-
-1. A complete JSON artifact containing:
-   - Summary validation metrics
-   - Every observation's input features
-   - Every observation's target
-   - Every raw scorer value
-   - Every calibrated scorer value
-   - Calibrated fusion kappa
-   - The uncalibrated average
-   - Every calibration-reference point
-   - Every scorer value over the calibration-reference space
-   - Calibration means and standard deviations
-
-2. Plot-friendly CSV files containing the same tabular outputs.
 """
 
 from __future__ import annotations
@@ -36,7 +21,8 @@ from typing import Callable, Dict, Iterable, List, Mapping, Tuple
 
 import numpy as np
 import pandas as pd
-from scipy.stats import kendalltau, spearmanr
+from scipy.stats import kendalltau, rankdata, spearmanr
+from sklearn.decomposition import PCA
 from sklearn.datasets import fetch_openml, load_breast_cancer
 from sklearn.metrics import average_precision_score, roc_auc_score
 from sklearn.preprocessing import OrdinalEncoder
@@ -63,9 +49,13 @@ class ScoreArtifacts:
     raw_reference_scores: pd.DataFrame
     calibrated_data_scores: pd.DataFrame
     calibrated_reference_scores: pd.DataFrame
+    empirical_zscore_data_scores: pd.DataFrame
     calibration_statistics: pd.DataFrame
     kappa: pd.Series
     uncalibrated_average: pd.Series
+    empirical_zscore_average: pd.Series
+    borda_count_average: pd.Series
+    pca_first_component: pd.Series
 
 
 @dataclass(frozen=True)
@@ -124,9 +114,6 @@ def evaluate_all_scorers(
 ) -> pd.DataFrame:
     """
     Evaluate every scorer once.
-
-    The returned dataframe contains one column for every scorer and one row
-    for every input instance.
     """
     score_columns: Dict[str, pd.Series] = {}
 
@@ -155,11 +142,8 @@ def compute_score_artifacts(
     scorers: Mapping[str, ScoreFn],
 ) -> ScoreArtifacts:
     """
-    Compute and retain every raw score, calibrated score, calibration
-    statistic, fused score, and uncalibrated average.
-
-    A scorer with zero variance over the calibration-reference space is
-    retained in the saved artifacts but excluded from calibrated fusion.
+    Compute and retain every raw score, calibrated score, normalization
+    statistic, fused score, uncalibrated average, and empirical-z-score/Borda baselines.
     """
     raw_data_scores = evaluate_all_scorers(
         data,
@@ -179,20 +163,58 @@ def compute_score_artifacts(
         index=calibration_grid.index,
     )
 
+    empirical_zscore_data_scores = pd.DataFrame(
+        index=data.index,
+    )
+
     statistics_rows: List[Dict[str, object]] = []
-    included_scorers: List[str] = []
+    included_calibrated_scorers: List[str] = []
+    included_empirical_scorers: List[str] = []
 
     for scorer_name in scorers:
         data_scores = raw_data_scores[scorer_name]
         reference_scores = raw_reference_scores[scorer_name]
 
+        # Proposed method: normalize against the synthetic reference space.
         reference_mean = reference_scores.mean()
         reference_std = reference_scores.std(ddof=0)
 
-        included = not (
+        included_in_calibrated_fusion = not (
             pd.isna(reference_std)
             or np.isclose(reference_std, 0.0)
         )
+
+        if included_in_calibrated_fusion:
+            included_calibrated_scorers.append(scorer_name)
+
+            calibrated_data_scores[scorer_name] = (
+                data_scores - reference_mean
+            ) / reference_std
+
+            calibrated_reference_scores[scorer_name] = (
+                reference_scores - reference_mean
+            ) / reference_std
+        else:
+            calibrated_data_scores[scorer_name] = np.nan
+            calibrated_reference_scores[scorer_name] = np.nan
+
+        # Baseline: normalize against the unlabeled observed dataset itself.
+        empirical_mean = data_scores.mean()
+        empirical_std = data_scores.std(ddof=0)
+
+        included_in_empirical_zscore = not (
+            pd.isna(empirical_std)
+            or np.isclose(empirical_std, 0.0)
+        )
+
+        if included_in_empirical_zscore:
+            included_empirical_scorers.append(scorer_name)
+
+            empirical_zscore_data_scores[scorer_name] = (
+                data_scores - empirical_mean
+            ) / empirical_std
+        else:
+            empirical_zscore_data_scores[scorer_name] = np.nan
 
         statistics_rows.append(
             {
@@ -207,7 +229,22 @@ def compute_score_artifacts(
                     if not pd.isna(reference_std)
                     else np.nan
                 ),
-                "included_in_fusion": bool(included),
+                "included_in_fusion": bool(
+                    included_in_calibrated_fusion
+                ),
+                "empirical_data_mean": (
+                    float(empirical_mean)
+                    if not pd.isna(empirical_mean)
+                    else np.nan
+                ),
+                "empirical_data_std": (
+                    float(empirical_std)
+                    if not pd.isna(empirical_std)
+                    else np.nan
+                ),
+                "included_in_empirical_zscore": bool(
+                    included_in_empirical_zscore
+                ),
                 "n_data_values": int(data_scores.notna().sum()),
                 "n_reference_values": int(
                     reference_scores.notna().sum()
@@ -215,30 +252,20 @@ def compute_score_artifacts(
             }
         )
 
-        if included:
-            included_scorers.append(scorer_name)
-
-            calibrated_data_scores[scorer_name] = (
-                data_scores - reference_mean
-            ) / reference_std
-
-            calibrated_reference_scores[scorer_name] = (
-                reference_scores - reference_mean
-            ) / reference_std
-        else:
-            # Retain the scorer as a column while indicating that its
-            # calibrated values are undefined and were not included in fusion.
-            calibrated_data_scores[scorer_name] = np.nan
-            calibrated_reference_scores[scorer_name] = np.nan
-
-    if not included_scorers:
+    if not included_calibrated_scorers:
         raise ValueError(
             "Fusion requires at least one scorer with nonzero variance "
             "over the calibration-reference space."
         )
 
+    if not included_empirical_scorers:
+        raise ValueError(
+            "Empirical z-score averaging requires at least one scorer "
+            "with nonzero variance over the observed dataset."
+        )
+
     kappa = (
-        calibrated_data_scores[included_scorers]
+        calibrated_data_scores[included_calibrated_scorers]
         .mean(axis=1)
         .rename("kappa")
     )
@@ -249,14 +276,47 @@ def compute_score_artifacts(
         .rename("uncalibrated_average")
     )
 
+    empirical_zscore_average = (
+        empirical_zscore_data_scores[included_empirical_scorers]
+        .mean(axis=1)
+        .rename("empirical_zscore_average")
+    )
+
+    # Borda Rank Averaging Baseline
+    n_obs = len(raw_data_scores)
+    ranks = pd.DataFrame(index=data.index)
+    for col in included_empirical_scorers:
+        ranks[col] = (rankdata(raw_data_scores[col]) - 1.0) / max(1, n_obs - 1)
+    borda_count_average = ranks.mean(axis=1).rename("borda_count_average")
+
+    # PCA Baseline (First Principal Component on empirical z-scores)
+    pca = PCA(n_components=1)
+    pc1_vals = pca.fit_transform(
+        empirical_zscore_data_scores[included_empirical_scorers].fillna(0)
+    ).ravel()
+
+    # Align directionality with the average scorer
+    if np.corrcoef(pc1_vals, empirical_zscore_average)[0, 1] < 0:
+        pc1_vals = -pc1_vals
+
+    pca_first_component = pd.Series(
+        pc1_vals,
+        index=data.index,
+        name="pca_first_component",
+    )
+
     return ScoreArtifacts(
         raw_data_scores=raw_data_scores,
         raw_reference_scores=raw_reference_scores,
         calibrated_data_scores=calibrated_data_scores,
         calibrated_reference_scores=calibrated_reference_scores,
+        empirical_zscore_data_scores=empirical_zscore_data_scores,
         calibration_statistics=pd.DataFrame(statistics_rows),
         kappa=kappa,
         uncalibrated_average=uncalibrated_average,
+        empirical_zscore_average=empirical_zscore_average,
+        borda_count_average=borda_count_average,
+        pca_first_component=pca_first_component,
     )
 
 
@@ -265,10 +325,7 @@ def fuse_calibrated_scores(
     calibration_grid: pd.DataFrame,
     scorers: Mapping[str, ScoreFn],
 ) -> pd.Series:
-    """
-    Compute kappa by calibrating each scorer against a synthetic ordinal
-    reference grid and averaging the nonconstant standardized scores.
-    """
+    """Compute kappa by calibrating each scorer against a synthetic ordinal reference grid."""
     return compute_score_artifacts(
         data=data,
         calibration_grid=calibration_grid,
@@ -408,13 +465,7 @@ def encode_ames_categories(
 
 
 def load_ames_housing() -> Tuple[pd.DataFrame, pd.Series]:
-    """
-    Load Ames Housing from OpenML.
-
-    OpenML's house_prices dataset is the Kaggle Ames Housing benchmark.
-    SalePrice is withheld during kappa construction and used only for
-    external evaluation.
-    """
+    """Load Ames Housing from OpenML."""
     bunch = fetch_openml(
         name="house_prices",
         as_frame=True,
@@ -564,13 +615,7 @@ def ames_scorers() -> Mapping[str, ScoreFn]:
 
 
 def load_bcw() -> Tuple[pd.DataFrame, pd.Series]:
-    """
-    Load Breast Cancer Wisconsin.
-
-    The sklearn target uses 0 = malignant and 1 = benign. It is inverted so
-    that 1 = malignant/high risk, matching the interpretation of kappa as
-    malignancy risk.
-    """
+    """Load Breast Cancer Wisconsin."""
     bunch = load_breast_cancer(as_frame=True)
 
     features = bunch.frame.drop(
@@ -760,6 +805,85 @@ def bcw_scorers() -> Mapping[str, ScoreFn]:
     }
 
 
+def load_wine_quality() -> Tuple[pd.DataFrame, pd.Series]:
+    """Load Wine Quality (Red) from OpenML."""
+    bunch = fetch_openml(name="wine-quality-red", version=1, as_frame=True, parser="auto")
+    frame = bunch.frame.copy()
+
+    # Standardize column names (lowercase and replace underscores with spaces)
+    frame.columns = frame.columns.str.lower().str.replace('_', ' ')
+
+    # OpenML renames the target to 'class' in version 1 of this dataset
+    target_col = "class" if "class" in frame.columns else "quality"
+
+    target = pd.to_numeric(frame.pop(target_col), errors="coerce").rename("quality")
+    features = frame.apply(pd.to_numeric, errors="coerce")
+    features = features.fillna(features.median())
+
+    return features, target
+
+
+def make_wine_calibration_grid(k: int = 5) -> pd.DataFrame:
+    """Construct a synthetic ordinal grid for wine quality."""
+    levels = np.linspace(0.0, 1.0, k)
+    rows = []
+
+    for acidity in levels:
+        for additives in levels:
+            for preservatives in levels:
+                for profile in levels:
+                    rows.append({
+                        # Acidity: Lower volatile acidity, higher citric acid is better
+                        "volatile acidity": 1.58 - acidity * (1.58 - 0.12),
+                        "citric acid": 0.0 + acidity * (1.0 - 0.0),
+
+                        # Additives: Lower chlorides, higher sulphates is better
+                        "chlorides": 0.611 - additives * (0.611 - 0.012),
+                        "sulphates": 0.33 + additives * (2.0 - 0.33),
+
+                        # Preservatives: Lower SO2 is better
+                        "free sulfur dioxide": 72.0 - preservatives * (72.0 - 1.0),
+                        "total sulfur dioxide": 289.0 - preservatives * (289.0 - 6.0),
+
+                        # Profile: Higher alcohol, lower density is better
+                        "alcohol": 8.0 + profile * (14.9 - 8.0),
+                        "density": 1.00369 - profile * (1.00369 - 0.99007),
+                    })
+
+    return pd.DataFrame(rows)
+
+
+def wine_scorers() -> Mapping[str, ScoreFn]:
+    """Wine scorers constructed using monotonic domain intuition."""
+
+    def acidity(df: pd.DataFrame) -> pd.Series:
+        v_acid_inv = -pd.to_numeric(df["volatile acidity"], errors="coerce")
+        c_acid = pd.to_numeric(df["citric acid"], errors="coerce")
+        return pd.concat([v_acid_inv, c_acid], axis=1).mean(axis=1)
+
+    def additives(df: pd.DataFrame) -> pd.Series:
+        chlor_inv = -pd.to_numeric(df["chlorides"], errors="coerce")
+        sulph = pd.to_numeric(df["sulphates"], errors="coerce")
+        return pd.concat([chlor_inv, sulph], axis=1).mean(axis=1)
+
+    def preservatives(df: pd.DataFrame) -> pd.Series:
+        free_inv = -pd.to_numeric(df["free sulfur dioxide"], errors="coerce")
+        total_inv = -pd.to_numeric(df["total sulfur dioxide"], errors="coerce")
+        return pd.concat([free_inv, total_inv], axis=1).mean(axis=1)
+
+    def profile(df: pd.DataFrame) -> pd.Series:
+        alc = pd.to_numeric(df["alcohol"], errors="coerce")
+        dens_inv = -pd.to_numeric(df["density"], errors="coerce")
+        return pd.concat([alc, dens_inv], axis=1).mean(axis=1)
+
+    return {
+        "acidity": acidity,
+        "additives": additives,
+        "preservatives": preservatives,
+        "profile": profile,
+    }
+
+
 def validation_results_from_artifacts(
     dataset: str,
     target_name: str,
@@ -767,7 +891,10 @@ def validation_results_from_artifacts(
     artifacts: ScoreArtifacts,
     task: str,
 ) -> List[ValidationResult]:
-    """Evaluate fused, uncalibrated, and individual scorer outputs."""
+    """
+    Evaluate calibrated fusion, empirical baselines (z-score, borda, pca), raw averaging,
+    and every individual scorer.
+    """
     if task == "regression":
         metric_function = regression_metrics
     elif task == "classification":
@@ -782,19 +909,31 @@ def validation_results_from_artifacts(
             dataset=dataset,
             method="calibrated_fusion_kappa",
             target=target_name,
-            metrics=metric_function(
-                artifacts.kappa,
-                target,
-            ),
+            metrics=metric_function(artifacts.kappa, target),
+        ),
+        ValidationResult(
+            dataset=dataset,
+            method="empirical_zscore_average",
+            target=target_name,
+            metrics=metric_function(artifacts.empirical_zscore_average, target),
+        ),
+        ValidationResult(
+            dataset=dataset,
+            method="borda_count_average",
+            target=target_name,
+            metrics=metric_function(artifacts.borda_count_average, target),
+        ),
+        ValidationResult(
+            dataset=dataset,
+            method="pca_first_component",
+            target=target_name,
+            metrics=metric_function(artifacts.pca_first_component, target),
         ),
         ValidationResult(
             dataset=dataset,
             method="uncalibrated_average",
             target=target_name,
-            metrics=metric_function(
-                artifacts.uncalibrated_average,
-                target,
-            ),
+            metrics=metric_function(artifacts.uncalibrated_average, target),
         ),
     ]
 
@@ -826,247 +965,143 @@ def build_dataset_artifacts(
     calibration_grid: pd.DataFrame,
     scores: ScoreArtifacts,
 ) -> DatasetArtifacts:
-    """
-    Build wide, plot-friendly tables containing all features and scores.
-    """
+    """Build wide, plot-friendly tables containing all features and scores."""
     observations = data.copy().add_prefix("feature_")
 
-    observations.insert(
-        0,
-        "row_id",
-        data.index,
-    )
+    observations.insert(0, "row_id", data.index)
+    observations[target_name] = target.reindex(data.index)
 
-    observations[target_name] = target.reindex(
-        data.index
-    )
-
-    observations["kappa"] = scores.kappa.reindex(
-        data.index
-    )
-
-    observations["uncalibrated_average"] = (
-        scores.uncalibrated_average.reindex(
-            data.index
-        )
-    )
+    observations["kappa"] = scores.kappa.reindex(data.index)
+    observations["uncalibrated_average"] = scores.uncalibrated_average.reindex(data.index)
+    observations["empirical_zscore_average"] = scores.empirical_zscore_average.reindex(data.index)
+    observations["borda_count_average"] = scores.borda_count_average.reindex(data.index)
+    observations["pca_first_component"] = scores.pca_first_component.reindex(data.index)
 
     for scorer_name in scores.raw_data_scores.columns:
-        observations[
-            f"raw_scorer_{scorer_name}"
-        ] = scores.raw_data_scores[
-            scorer_name
-        ].reindex(data.index)
+        observations[f"raw_scorer_{scorer_name}"] = scores.raw_data_scores[scorer_name].reindex(data.index)
+        observations[f"calibrated_scorer_{scorer_name}"] = scores.calibrated_data_scores[scorer_name].reindex(data.index)
+        observations[f"empirical_zscore_scorer_{scorer_name}"] = scores.empirical_zscore_data_scores[scorer_name].reindex(data.index)
 
-        observations[
-            f"calibrated_scorer_{scorer_name}"
-        ] = scores.calibrated_data_scores[
-            scorer_name
-        ].reindex(data.index)
+    observations = observations.reset_index(drop=True)
 
-    observations = observations.reset_index(
-        drop=True
-    )
-
-    calibration_reference = (
-        calibration_grid.copy()
-        .add_prefix("feature_")
-    )
-
-    calibration_reference.insert(
-        0,
-        "calibration_id",
-        np.arange(
-            len(calibration_reference)
-        ),
-    )
+    calibration_reference = calibration_grid.copy().add_prefix("feature_")
+    calibration_reference.insert(0, "calibration_id", np.arange(len(calibration_reference)))
 
     for scorer_name in scores.raw_reference_scores.columns:
-        calibration_reference[
-            f"raw_reference_scorer_{scorer_name}"
-        ] = (
-            scores.raw_reference_scores[scorer_name]
-            .reindex(calibration_grid.index)
-            .to_numpy()
+        calibration_reference[f"raw_reference_scorer_{scorer_name}"] = (
+            scores.raw_reference_scores[scorer_name].reindex(calibration_grid.index).to_numpy()
         )
-
-        calibration_reference[
-            f"calibrated_reference_scorer_{scorer_name}"
-        ] = (
-            scores.calibrated_reference_scores[scorer_name]
-            .reindex(calibration_grid.index)
-            .to_numpy()
+        calibration_reference[f"calibrated_reference_scorer_{scorer_name}"] = (
+            scores.calibrated_reference_scores[scorer_name].reindex(calibration_grid.index).to_numpy()
         )
 
     return DatasetArtifacts(
-        slug=slug,
-        dataset=dataset,
-        target=target_name,
-        task=task,
-        k=k,
-        observations=observations,
-        calibration_reference=calibration_reference,
-        calibration_statistics=(
-            scores.calibration_statistics.copy()
-        ),
+        slug=slug, dataset=dataset, target=target_name, task=task, k=k,
+        observations=observations, calibration_reference=calibration_reference,
+        calibration_statistics=(scores.calibration_statistics.copy()),
     )
 
 
-def run_ames_validation_with_artifacts(
-    k: int = 5,
-) -> Tuple[List[ValidationResult], DatasetArtifacts]:
-    """Run Ames validation and retain every intermediate score."""
+def run_ames_validation_with_artifacts(k: int = 5) -> Tuple[List[ValidationResult], DatasetArtifacts]:
+    """Run Ames validation and retain artifacts."""
     x, y = load_ames_housing()
     scorers = ames_scorers()
     calibration_grid = make_ames_calibration_grid(k=k)
 
-    score_artifacts = compute_score_artifacts(
-        data=x,
-        calibration_grid=calibration_grid,
-        scorers=scorers,
-    )
+    score_artifacts = compute_score_artifacts(data=x, calibration_grid=calibration_grid, scorers=scorers)
 
     results = validation_results_from_artifacts(
-        dataset="Ames Housing",
-        target_name="SalePrice",
-        target=y,
-        artifacts=score_artifacts,
-        task="regression",
+        dataset="Ames Housing", target_name="SalePrice", target=y,
+        artifacts=score_artifacts, task="regression",
     )
 
     dataset_artifacts = build_dataset_artifacts(
-        slug="ames_housing",
-        dataset="Ames Housing",
-        target_name="SalePrice",
-        task="regression",
-        k=k,
-        data=x,
-        target=y,
-        calibration_grid=calibration_grid,
-        scores=score_artifacts,
+        slug="ames_housing", dataset="Ames Housing", target_name="SalePrice",
+        task="regression", k=k, data=x, target=y,
+        calibration_grid=calibration_grid, scores=score_artifacts,
     )
-
     return results, dataset_artifacts
 
 
-def run_ames_validation(
-    k: int = 5,
-) -> List[ValidationResult]:
-    """Run calibration-first validation on Ames Housing."""
-    results, _ = run_ames_validation_with_artifacts(k=k)
-    return results
-
-
-def run_bcw_validation_with_artifacts(
-    k: int = 5,
-) -> Tuple[List[ValidationResult], DatasetArtifacts]:
-    """Run BCW validation and retain every intermediate score."""
+def run_bcw_validation_with_artifacts(k: int = 5) -> Tuple[List[ValidationResult], DatasetArtifacts]:
+    """Run BCW validation and retain artifacts."""
     x, y = load_bcw()
     scorers = bcw_scorers()
     calibration_grid = make_bcw_calibration_grid(k=k)
 
-    score_artifacts = compute_score_artifacts(
-        data=x,
-        calibration_grid=calibration_grid,
-        scorers=scorers,
-    )
+    score_artifacts = compute_score_artifacts(data=x, calibration_grid=calibration_grid, scorers=scorers)
 
     results = validation_results_from_artifacts(
-        dataset="Breast Cancer Wisconsin",
-        target_name="malignant",
-        target=y,
-        artifacts=score_artifacts,
-        task="classification",
+        dataset="Breast Cancer Wisconsin", target_name="malignant", target=y,
+        artifacts=score_artifacts, task="classification",
     )
 
     dataset_artifacts = build_dataset_artifacts(
-        slug="breast_cancer_wisconsin",
-        dataset="Breast Cancer Wisconsin",
-        target_name="malignant",
-        task="classification",
-        k=k,
-        data=x,
-        target=y,
-        calibration_grid=calibration_grid,
-        scores=score_artifacts,
+        slug="breast_cancer_wisconsin", dataset="Breast Cancer Wisconsin", target_name="malignant",
+        task="classification", k=k, data=x, target=y,
+        calibration_grid=calibration_grid, scores=score_artifacts,
     )
-
     return results, dataset_artifacts
 
 
-def run_bcw_validation(
-    k: int = 5,
-) -> List[ValidationResult]:
-    """Run validation on Breast Cancer Wisconsin."""
-    results, _ = run_bcw_validation_with_artifacts(k=k)
-    return results
+def run_wine_validation_with_artifacts(k: int = 5) -> Tuple[List[ValidationResult], DatasetArtifacts]:
+    """Run Wine Quality validation and retain artifacts."""
+    x, y = load_wine_quality()
+    scorers = wine_scorers()
+    calibration_grid = make_wine_calibration_grid(k=k)
+
+    score_artifacts = compute_score_artifacts(data=x, calibration_grid=calibration_grid, scorers=scorers)
+
+    results = validation_results_from_artifacts(
+        dataset="Wine Quality", target_name="quality", target=y,
+        artifacts=score_artifacts, task="regression",
+    )
+
+    dataset_artifacts = build_dataset_artifacts(
+        slug="wine_quality", dataset="Wine Quality", target_name="quality",
+        task="regression", k=k, data=x, target=y,
+        calibration_grid=calibration_grid, scores=score_artifacts,
+    )
+    return results, dataset_artifacts
 
 
-def results_to_frame(
-    results: Iterable[ValidationResult],
-) -> pd.DataFrame:
+def results_to_frame(results: Iterable[ValidationResult]) -> pd.DataFrame:
     """Convert validation results into a flat dataframe."""
     rows = []
-
     for result in results:
         row = {
             "dataset": result.dataset,
             "method": result.method,
             "target": result.target,
         }
-
         row.update(result.metrics)
         rows.append(row)
-
     return pd.DataFrame(rows)
 
 
-def run_all_validations_with_artifacts(
-    k: int = 5,
-) -> Tuple[pd.DataFrame, Dict[str, DatasetArtifacts]]:
+def run_all_validations_with_artifacts(k: int = 5) -> Tuple[pd.DataFrame, Dict[str, DatasetArtifacts]]:
     """Run all experiments and retain complete per-dataset artifacts."""
     results: List[ValidationResult] = []
     datasets: Dict[str, DatasetArtifacts] = {}
 
-    ames_results, ames_artifacts = (
-        run_ames_validation_with_artifacts(k=k)
-    )
-
+    ames_results, ames_artifacts = run_ames_validation_with_artifacts(k=k)
     results.extend(ames_results)
     datasets[ames_artifacts.slug] = ames_artifacts
 
-    bcw_results, bcw_artifacts = (
-        run_bcw_validation_with_artifacts(k=k)
-    )
-
+    bcw_results, bcw_artifacts = run_bcw_validation_with_artifacts(k=k)
     results.extend(bcw_results)
     datasets[bcw_artifacts.slug] = bcw_artifacts
+
+    wine_results, wine_artifacts = run_wine_validation_with_artifacts(k=k)
+    results.extend(wine_results)
+    datasets[wine_artifacts.slug] = wine_artifacts
 
     return results_to_frame(results), datasets
 
 
-def run_all_validations(
-    k: int = 5,
-) -> pd.DataFrame:
-    """Run all experiments and return only summary metrics."""
-    summary, _ = run_all_validations_with_artifacts(k=k)
-    return summary
-
-
-def dataframe_to_json_records(
-    frame: pd.DataFrame,
-) -> List[Dict[str, object]]:
-    """
-    Convert a dataframe to JSON-compatible records.
-
-    Passing through pandas' JSON serializer converts NumPy scalar values
-    and missing values into standard JSON-compatible representations.
-    """
-    serialized = frame.to_json(
-        orient="records",
-        double_precision=15,
-    )
-
+def dataframe_to_json_records(frame: pd.DataFrame) -> List[Dict[str, object]]:
+    """Convert a dataframe to JSON-compatible records."""
+    serialized = frame.to_json(orient="records", double_precision=15)
     return json.loads(serialized)
 
 
@@ -1077,22 +1112,15 @@ def save_validation_outputs(
     k: int,
     write_csv: bool = True,
 ) -> Path:
-    """
-    Save one complete JSON artifact and optional plot-friendly CSV files.
-    """
+    """Save one complete JSON artifact and optional plot-friendly CSV files."""
     output_path = Path(output_dir)
-    output_path.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    output_path.mkdir(parents=True, exist_ok=True)
 
     payload: Dict[str, object] = {
         "schema_version": 1,
         "experiment": "cross_domain_validation",
         "calibration_resolution_k": int(k),
-        "summary_metrics": dataframe_to_json_records(
-            summary
-        ),
+        "summary_metrics": dataframe_to_json_records(summary),
         "datasets": {},
     }
 
@@ -1108,73 +1136,27 @@ def save_validation_outputs(
             "target": artifacts.target,
             "task": artifacts.task,
             "k": int(artifacts.k),
-            "n_observations": int(
-                len(artifacts.observations)
-            ),
-            "n_calibration_points": int(
-                len(artifacts.calibration_reference)
-            ),
-            "metrics": dataframe_to_json_records(
-                dataset_metrics
-            ),
-            "calibration_statistics": (
-                dataframe_to_json_records(
-                    artifacts.calibration_statistics
-                )
-            ),
-            "observations": dataframe_to_json_records(
-                artifacts.observations
-            ),
-            "calibration_reference": (
-                dataframe_to_json_records(
-                    artifacts.calibration_reference
-                )
-            ),
+            "n_observations": int(len(artifacts.observations)),
+            "n_calibration_points": int(len(artifacts.calibration_reference)),
+            "metrics": dataframe_to_json_records(dataset_metrics),
+            "calibration_statistics": dataframe_to_json_records(artifacts.calibration_statistics),
+            "observations": dataframe_to_json_records(artifacts.observations),
+            "calibration_reference": dataframe_to_json_records(artifacts.calibration_reference),
         }
 
         if write_csv:
-            artifacts.observations.to_csv(
-                output_path
-                / f"{slug}_observations.csv",
-                index=False,
-            )
-
-            artifacts.calibration_reference.to_csv(
-                output_path
-                / f"{slug}_calibration_reference.csv",
-                index=False,
-            )
-
-            artifacts.calibration_statistics.to_csv(
-                output_path
-                / f"{slug}_calibration_statistics.csv",
-                index=False,
-            )
+            artifacts.observations.to_csv(output_path / f"{slug}_observations.csv", index=False)
+            artifacts.calibration_reference.to_csv(output_path / f"{slug}_calibration_reference.csv", index=False)
+            artifacts.calibration_statistics.to_csv(output_path / f"{slug}_calibration_statistics.csv", index=False)
 
     payload["datasets"] = dataset_payloads
 
     if write_csv:
-        summary.to_csv(
-            output_path / "validation_metrics.csv",
-            index=False,
-        )
+        summary.to_csv(output_path / "validation_metrics.csv", index=False)
 
-    json_path = (
-        output_path
-        / f"cross_domain_validation_k{k}.json"
-    )
-
-    with json_path.open(
-        "w",
-        encoding="utf-8",
-    ) as file:
-        json.dump(
-            payload,
-            file,
-            indent=2,
-            ensure_ascii=False,
-            allow_nan=False,
-        )
+    json_path = output_path / f"cross_domain_validation_k{k}.json"
+    with json_path.open("w", encoding="utf-8") as file:
+        json.dump(payload, file, indent=2, ensure_ascii=False, allow_nan=False)
 
     return json_path
 
@@ -1182,54 +1164,18 @@ def save_validation_outputs(
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description=(
-            "Run cross-domain calibration validation and save every "
-            "feature, scorer, calibration, fusion, and metric value."
-        )
+        description="Run cross-domain calibration validation with standard unsupervised baselines."
     )
-
-    parser.add_argument(
-        "--k",
-        type=int,
-        default=5,
-        help=(
-            "Number of calibration levels per dimension. "
-            "The default is 5."
-        ),
-    )
-
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=Path(
-            "results/cross_domain_validation"
-        ),
-        help=(
-            "Directory in which JSON and CSV result files "
-            "will be written."
-        ),
-    )
-
-    parser.add_argument(
-        "--json-only",
-        action="store_true",
-        help=(
-            "Write the complete JSON artifact without "
-            "companion CSV files."
-        ),
-    )
-
+    parser.add_argument("--k", type=int, default=5, help="Number of calibration levels per dimension.")
+    parser.add_argument("--output-dir", type=Path, default=Path("results/cross_domain_validation"))
+    parser.add_argument("--json-only", action="store_true")
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
 
-    summary, dataset_artifacts = (
-        run_all_validations_with_artifacts(
-            k=args.k
-        )
-    )
+    summary, dataset_artifacts = run_all_validations_with_artifacts(k=args.k)
 
     json_path = save_validation_outputs(
         summary=summary,
@@ -1239,29 +1185,10 @@ if __name__ == "__main__":
         write_csv=not args.json_only,
     )
 
-    pd.set_option(
-        "display.max_columns",
-        None,
-    )
+    pd.set_option("display.max_columns", None)
+    pd.set_option("display.width", 160)
 
-    pd.set_option(
-        "display.width",
-        160,
-    )
-
-    print(
-        summary.round(4).to_string(
-            index=False
-        )
-    )
-
-    print(
-        f"\nSaved complete JSON artifact to: "
-        f"{json_path}"
-    )
-
+    print(summary.round(4).to_string(index=False))
+    print(f"\nSaved complete JSON artifact to: {json_path}")
     if not args.json_only:
-        print(
-            f"Saved companion CSV files to: "
-            f"{args.output_dir}"
-        )
+        print(f"Saved companion CSV files to: {args.output_dir}")

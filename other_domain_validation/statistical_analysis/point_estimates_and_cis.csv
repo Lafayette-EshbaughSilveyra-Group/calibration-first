@@ -1,0 +1,41 @@
+dataset_key,dataset,task,metric,metric_label,primary_metric,method,method_label,estimate,ci_level,ci_low,ci_high,bootstrap_replicates,valid_bootstrap_replicates
+ames,Ames Housing,regression,spearman_rho,Spearman's rho,True,kappa,Calibrated Fusion (κ),0.8904734445660732,0.95,0.8762426498791999,0.9029665558476374,50000,50000
+ames,Ames Housing,regression,spearman_rho,Spearman's rho,True,uncalibrated_average,Uncalibrated Avg,0.8593331932727742,0.95,0.839636726666689,0.8770801701086047,50000,50000
+ames,Ames Housing,regression,spearman_rho,Spearman's rho,True,empirical_zscore_average,Empirical z-Score,0.9077017162319427,0.95,0.8952011013781782,0.9185495927428144,50000,50000
+ames,Ames Housing,regression,spearman_rho,Spearman's rho,True,borda_count_average,Borda Rank Avg,0.9052845331375914,0.95,0.893169578708769,0.9156080977751845,50000,50000
+ames,Ames Housing,regression,spearman_rho,Spearman's rho,True,pca_first_component,Unsupervised PCA,0.908526768792511,0.95,0.8960340836254885,0.9193421655168943,50000,50000
+ames,Ames Housing,regression,kendall_tau,Kendall's tau,False,kappa,Calibrated Fusion (κ),0.7197270960124116,0.95,0.7025243041749467,0.736163709795128,50000,50000
+ames,Ames Housing,regression,kendall_tau,Kendall's tau,False,uncalibrated_average,Uncalibrated Avg,0.6889881666267784,0.95,0.6687999005635706,0.7085460704212032,50000,50000
+ames,Ames Housing,regression,kendall_tau,Kendall's tau,False,empirical_zscore_average,Empirical z-Score,0.7443536879229296,0.95,0.7283284897404465,0.7596506544962257,50000,50000
+ames,Ames Housing,regression,kendall_tau,Kendall's tau,False,borda_count_average,Borda Rank Avg,0.7358591622177107,0.95,0.7205233321889142,0.7503966586442838,50000,50000
+ames,Ames Housing,regression,kendall_tau,Kendall's tau,False,pca_first_component,Unsupervised PCA,0.7456303298459134,0.95,0.7296385977039684,0.7608383486175779,50000,50000
+ames,Ames Housing,regression,top_10pct_overlap,Top-10% overlap,False,kappa,Calibrated Fusion (κ),0.7397260273972602,0.95,0.678082191780822,0.8013698630136986,50000,50000
+ames,Ames Housing,regression,top_10pct_overlap,Top-10% overlap,False,uncalibrated_average,Uncalibrated Avg,0.7328767123287672,0.95,0.6643835616438356,0.7808219178082192,50000,50000
+ames,Ames Housing,regression,top_10pct_overlap,Top-10% overlap,False,empirical_zscore_average,Empirical z-Score,0.7808219178082192,0.95,0.7123287671232876,0.821917808219178,50000,50000
+ames,Ames Housing,regression,top_10pct_overlap,Top-10% overlap,False,borda_count_average,Borda Rank Avg,0.7328767123287672,0.95,0.6643835616438356,0.7808219178082192,50000,50000
+ames,Ames Housing,regression,top_10pct_overlap,Top-10% overlap,False,pca_first_component,Unsupervised PCA,0.7808219178082192,0.95,0.7123287671232876,0.821917808219178,50000,50000
+bcw,Breast Cancer Wisconsin,classification,auroc,AUROC,True,kappa,Calibrated Fusion (κ),0.9843031552243539,0.95,0.9755715338880423,0.9914208074534161,50000,50000
+bcw,Breast Cancer Wisconsin,classification,auroc,AUROC,True,uncalibrated_average,Uncalibrated Avg,0.9574943184821099,0.95,0.9403700211269151,0.972439039850932,50000,50000
+bcw,Breast Cancer Wisconsin,classification,auroc,AUROC,True,empirical_zscore_average,Empirical z-Score,0.9826515511865123,0.95,0.9736952578112297,0.9900940498745523,50000,50000
+bcw,Breast Cancer Wisconsin,classification,auroc,AUROC,True,borda_count_average,Borda Rank Avg,0.9840851434913588,0.95,0.9749980060532374,0.9914975748758315,50000,50000
+bcw,Breast Cancer Wisconsin,classification,auroc,AUROC,True,pca_first_component,Unsupervised PCA,0.9866814650388458,0.95,0.9783561347328471,0.9932925280656167,50000,50000
+bcw,Breast Cancer Wisconsin,classification,average_precision,Average precision,False,kappa,Calibrated Fusion (κ),0.9770078527931554,0.95,0.9646799190605589,0.9870261808402112,50000,50000
+bcw,Breast Cancer Wisconsin,classification,average_precision,Average precision,False,uncalibrated_average,Uncalibrated Avg,0.9455791011141665,0.95,0.9240031236627787,0.9637990388790234,50000,50000
+bcw,Breast Cancer Wisconsin,classification,average_precision,Average precision,False,empirical_zscore_average,Empirical z-Score,0.9743383503038405,0.95,0.9612817856347818,0.9850314043544166,50000,50000
+bcw,Breast Cancer Wisconsin,classification,average_precision,Average precision,False,borda_count_average,Borda Rank Avg,0.9774308051181312,0.95,0.9652427343759811,0.9874059858565513,50000,50000
+bcw,Breast Cancer Wisconsin,classification,average_precision,Average precision,False,pca_first_component,Unsupervised PCA,0.9812117464357145,0.95,0.9703232916559421,0.989941319466695,50000,50000
+wine,Wine Quality,regression,spearman_rho,Spearman's rho,True,kappa,Calibrated Fusion (κ),0.5556883866659688,0.95,0.5196751062012189,0.589962140506288,50000,50000
+wine,Wine Quality,regression,spearman_rho,Spearman's rho,True,uncalibrated_average,Uncalibrated Avg,0.19157319054749145,0.95,0.14212950342511088,0.24033480909542815,50000,50000
+wine,Wine Quality,regression,spearman_rho,Spearman's rho,True,empirical_zscore_average,Empirical z-Score,0.5463996554288147,0.95,0.5095812948639572,0.58154813796757,50000,50000
+wine,Wine Quality,regression,spearman_rho,Spearman's rho,True,borda_count_average,Borda Rank Avg,0.5488031275611673,0.95,0.5127328730740756,0.5835063164721818,50000,50000
+wine,Wine Quality,regression,spearman_rho,Spearman's rho,True,pca_first_component,Unsupervised PCA,0.5460263727454604,0.95,0.5089573700609972,0.5813038123023796,50000,50000
+wine,Wine Quality,regression,kendall_tau,Kendall's tau,False,kappa,Calibrated Fusion (κ),0.44030555769808494,0.95,0.41067036171745136,0.4690928232658816,50000,50000
+wine,Wine Quality,regression,kendall_tau,Kendall's tau,False,uncalibrated_average,Uncalibrated Avg,0.1510577536475259,0.95,0.11238918934792,0.18932633037515337,50000,50000
+wine,Wine Quality,regression,kendall_tau,Kendall's tau,False,empirical_zscore_average,Empirical z-Score,0.43364811993855357,0.95,0.4036038069765026,0.46295483704227713,50000,50000
+wine,Wine Quality,regression,kendall_tau,Kendall's tau,False,borda_count_average,Borda Rank Avg,0.4339477277270548,0.95,0.40433943236539843,0.4629326610565482,50000,50000
+wine,Wine Quality,regression,kendall_tau,Kendall's tau,False,pca_first_component,Unsupervised PCA,0.43490541903448854,0.95,0.40445676605969455,0.4644695270893447,50000,50000
+wine,Wine Quality,regression,top_10pct_overlap,Top-10% overlap,False,kappa,Calibrated Fusion (κ),0.44375,0.95,0.35,0.48125,50000,50000
+wine,Wine Quality,regression,top_10pct_overlap,Top-10% overlap,False,uncalibrated_average,Uncalibrated Avg,0.20625,0.95,0.14375,0.25625,50000,50000
+wine,Wine Quality,regression,top_10pct_overlap,Top-10% overlap,False,empirical_zscore_average,Empirical z-Score,0.425,0.95,0.3375,0.46875,50000,50000
+wine,Wine Quality,regression,top_10pct_overlap,Top-10% overlap,False,borda_count_average,Borda Rank Avg,0.4625,0.95,0.3625,0.49375,50000,50000
+wine,Wine Quality,regression,top_10pct_overlap,Top-10% overlap,False,pca_first_component,Unsupervised PCA,0.3875,0.95,0.33125,0.45625,50000,50000

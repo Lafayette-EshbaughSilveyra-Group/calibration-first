@@ -1,0 +1,62 @@
+{
+  "bootstrap_replicates": 50000,
+  "confidence": 0.95,
+  "seed": 20260922,
+  "bootstrap_type": "paired nonparametric percentile bootstrap",
+  "reference_method": "kappa",
+  "methods": {
+    "kappa": "Calibrated Fusion (\u03ba)",
+    "uncalibrated_average": "Uncalibrated Avg",
+    "empirical_zscore_average": "Empirical z-Score",
+    "borda_count_average": "Borda Rank Avg",
+    "pca_first_component": "Unsupervised PCA"
+  },
+  "datasets": {
+    "ames": {
+      "filename": "ames_housing_observations.csv",
+      "name": "Ames Housing",
+      "target": "SalePrice",
+      "task": "regression",
+      "primary_metric": "spearman_rho",
+      "metrics": [
+        "spearman_rho",
+        "kendall_tau",
+        "top_10pct_overlap"
+      ]
+    },
+    "bcw": {
+      "filename": "breast_cancer_wisconsin_observations.csv",
+      "name": "Breast Cancer Wisconsin",
+      "target": "malignant",
+      "task": "classification",
+      "primary_metric": "auroc",
+      "metrics": [
+        "auroc",
+        "average_precision"
+      ]
+    },
+    "wine": {
+      "filename": "wine_quality_observations.csv",
+      "name": "Wine Quality",
+      "target": "quality",
+      "task": "regression",
+      "primary_metric": "spearman_rho",
+      "metrics": [
+        "spearman_rho",
+        "kendall_tau",
+        "top_10pct_overlap"
+      ]
+    }
+  },
+  "primary_comparisons": "kappa versus each comparison method on the primary metric",
+  "familywise_adjustment": {
+    "method": "Bonferroni",
+    "family": "For each baseline separately, the primary-metric kappa-vs-baseline comparisons across the three datasets",
+    "family_size_per_baseline": 3
+  },
+  "notes": [
+    "All methods within a bootstrap replicate use the same sampled observation indices.",
+    "bootstrap_fraction_* values are descriptive bootstrap fractions, not frequentist p-values.",
+    "No non-inferiority margin is tested. Such a margin should be scientifically justified rather than selected after observing the results."
+  ]
+}

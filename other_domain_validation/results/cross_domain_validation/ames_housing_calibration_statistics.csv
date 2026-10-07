@@ -1,0 +1,5 @@
+scorer,reference_mean,reference_std,included_in_fusion,empirical_data_mean,empirical_data_std,included_in_empirical_zscore,n_data_values,n_reference_values
+physical_scale,1550.0,777.8174593052023,True,1286.4465753424658,411.6581948729795,True,1460,625
+quality_condition,6.0,2.4748737341529163,True,5.837328767123288,0.8464735802428596,True,1460,625
+age_modernization,1972.5,26.516504294495533,True,1978.0667808219177,22.783634460417716,True,1460,625
+garage_capacity,251.0,177.48380207782344,True,237.3736301369863,107.19557863364948,True,1460,625

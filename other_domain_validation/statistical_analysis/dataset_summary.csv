@@ -1,0 +1,4 @@
+dataset_key,dataset,task,target,n,primary_metric,n_positive,n_negative,positive_fraction
+ames,Ames Housing,regression,SalePrice,1460,spearman_rho,,,
+bcw,Breast Cancer Wisconsin,classification,malignant,569,auroc,212.0,357.0,0.37258347978910367
+wine,Wine Quality,regression,quality,1599,spearman_rho,,,

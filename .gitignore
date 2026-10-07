@@ -1,2 +1,35 @@
-synthetic_homes/.env
+# Environment / secrets
+.env
+*.env
 .venv/
+venv/
+
+# Python
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# macOS
+.DS_Store
+**/.DS_Store
+__MACOSX/
+
+# IDEs
+.idea/
+.vscode/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz
+
+# Temporary / archived experiment outputs
+*.zip

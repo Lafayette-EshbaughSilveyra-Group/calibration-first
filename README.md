@@ -1,36 +1,125 @@
 # Align Before You Combine: A Calibration-First Framework for Supervision Without Ground Truth
 
-This repository contains the reference implementation and experimental code accompanying the forthcoming paper *Align Before You Combine: A Calibration-First Framework for Supervision Without Ground Truth*.
+This repository contains the reference implementation and experimental code for *Align Before You Combine: A Calibration-First Framework for Supervision Without Ground Truth*.
 
-## Framework Synopsis
+## Overview
 
-Many real-world problems require constructing supervision signals from heterogeneous sources of evidence without access to ground-truth labels. Directly combining outputs from different scorers can be problematic when those scorers differ in scale, offset, or interpretation.
+Many applications require constructing supervision signals from heterogeneous evidence sources without access to ground-truth labels or a shared annotation space. Directly combining scorer outputs can be problematic when those outputs differ in scale, offset, or interpretation.
 
-This framework introduces a calibration-first approach to supervision construction. A synthetic ordinal reference space is first constructed from domain knowledge, and subset-specific scorers are independently evaluated over this shared semantic reference. Their outputs are then standardized using calibration statistics derived from the reference space, placing heterogeneous scorers on a common unitless scale before fusion.
+Our framework takes a **calibration-first** approach. We construct an externally defined synthetic ordinal reference space from ordered domain features and evaluate each scorer over that common reference. Scorer-specific calibration statistics are then estimated from the reference space and used to place heterogeneous scorer outputs on a common unitless scale before fusion.
 
-The framework is scorer-agnostic and can accommodate heuristic, simulation-based, statistical, machine-learning, and large language model (LLM) scorers, provided that each scorer can be evaluated over the calibration reference space and that scorer directionality is aligned.
+The framework is scorer-agnostic: scorers may be heuristic, simulation-based, statistical, machine-learning, or language-model based, provided that they can be evaluated over the calibration reference space and their directionality can be aligned.
 
-For a complete theoretical treatment, see the accompanying paper (forthcoming).
+## Repository Structure
 
-## Experiments
+```text
+.
+├── synthetic_homes/
+│   ├── build_calibration_space.py
+│   ├── run_synthetic_homes.py
+│   ├── text_score_adapter.py
+│   └── k_sensitivity/
+├── other_domain_validation/
+│   ├── validations.py
+│   ├── statistics.py
+│   ├── results/
+│   └── statistical_analysis/
+├── dataset_licenses.md
+├── requirements.txt
+└── README.md
+```
 
-### Synthetic Homes Testing (Sec. 4.1)
+`synthetic_homes/` contains the residential energy-retrofit case study and calibration-resolution analysis. `other_domain_validation/` contains the cross-domain benchmark experiments and paired bootstrap analysis reported in the paper.
 
-Implements the residential energy retrofit case study presented in the paper. The framework is used to construct supervision signals from textual inspection reports and EnergyPlus simulation outputs without requiring retrofit-priority labels. This directory contains the calibration pipeline, subset-specific scorers, fusion procedures, ablation studies, agreement and conflict experiments, and calibration-resolution sensitivity testing.
+## Setup
 
-#### $k$ Sensitivity Testing
+Create and activate a Python virtual environment, then install the required dependencies:
 
-The sensitivity of the calibration-grid resolution $k$ is evaluated using the Synthetic Homes case study. A $k=15$ master calibration grid is generated once, and lower-resolution grids are obtained by selecting approximately evenly spaced subsets of the master grid.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-To reproduce the experiment:
+The residential case study additionally requires an OpenAI API key for the language-model scorer:
 
-1. Clone the Synthetic Homes repository ([`Lafayette-EshbaughSilveyra-Group/synthetic-homes`](https://github.com/Lafayette-EshbaughSilveyra-Group/synthetic-homes)) alongside this repository.
+```bash
+export OPENAI_API_KEY="..."
+```
 
-2. Follow the setup instructions in the Synthetic Homes `README.md`, including installation of its Python dependencies and EnergyPlus, and activate the corresponding virtual environment.
+The API key should not be committed to the repository.
 
-3. From this repository, generate the $k=15$ master calibration grid using `generate_calibration_grid.py`. For example:
+## Residential Energy-Retrofit Case Study
 
-```zsh
+The Synthetic Homes case study constructs supervision for **residential retrofit priority** from four heterogeneous scoring channels:
+
+- text-based HVAC evidence;
+- structured HVAC evidence;
+- text-based insulation evidence; and
+- structured insulation evidence.
+
+The shared calibration space is formed from four ordered building characteristics:
+
+1. heating COP;
+2. cooling COP;
+3. roof R-value; and
+4. wall R-value.
+
+At the default resolution of five levels per feature, this produces a \(5^4 = 625\)-point synthetic ordinal reference space.
+
+### Constructing the Calibration Space
+
+To construct the 625-point reference space:
+
+```bash
+python3 synthetic_homes/build_calibration_space.py
+```
+
+### Synthetic Homes Data
+
+The residential case study and calibration-resolution experiments use the Synthetic Homes pipeline described in the accompanying work. The dataset is generated externally using the Synthetic Homes repository ([Lafayette-EshbaughSilveyra-Group](https://github.com/Lafayette-EshbaughSilveyra-Group/synthetic-homes)) and is not included in this repository.
+
+Follow the Synthetic Homes repository instructions to generate the residential dataset and EnergyPlus outputs, then provide the resulting dataset directory to the scripts in this repository using the `--dataset-dir` argument.
+
+### Running the Case Study
+
+The reported text scorer is implemented in `synthetic_homes/text_score_adapter.py`. To run the case-study pipeline:
+
+```bash
+python3 synthetic_homes/run_synthetic_homes.py \
+    --notes synthetic_homes/note_templates.json \
+    --text-scorer synthetic_homes.text_score_adapter:score_text \
+    --output-dir synthetic_homes/results
+```
+
+A mechanical smoke test can instead be run with:
+
+```bash
+python3 synthetic_homes/run_synthetic_homes.py \
+    --notes synthetic_homes/note_templates.json \
+    --text-scorer demo \
+    --output-dir synthetic_homes/results
+```
+
+The demo scorer is provided only for testing the pipeline and does not reproduce the reported experimental results.
+
+## Calibration-Resolution Sensitivity
+
+The paper also evaluates sensitivity to the resolution \(k\) of the synthetic calibration space.
+
+The high-resolution Synthetic Homes experiment uses a \(k=15\) master grid, corresponding to
+
+\[
+15^4 = 50{,}625
+\]
+
+calibration points. Lower-resolution spaces are obtained by selecting approximately evenly spaced levels from this master grid.
+
+This experiment requires the companion Synthetic Homes repository and EnergyPlus.
+
+From the repository root, generate the \(k=15\) master grid with:
+
+```bash
 python3 synthetic_homes/k_sensitivity/generate_calibration_grid.py \
     --synthetic-homes-root ../synthetic-homes \
     --epw ../synthetic-homes/weather/KMSP.epw \
@@ -39,58 +128,71 @@ python3 synthetic_homes/k_sensitivity/generate_calibration_grid.py \
     --max-workers 8
 ```
 
-The generator constructs $15^4 = 50{,}625$ EnergyPlus calibration points. Because this step is computationally intensive, execution on a remote or high-performance computing system is recommended.
+Because this step runs 50,625 EnergyPlus simulations, execution on a multicore or high-performance computing system is recommended. Interrupted runs can be resumed by adding `--resume`.
 
-The generator stores compact calibration artifacts under:
+Once the calibration grid and target Synthetic Homes dataset are available, run:
 
-```text
-synthetic_homes/k_sensitivity/calibration_grid/
-└── data/
-    ├── calibration_meta.json
-    ├── calibration_levels.json
-    ├── summary_stats.json
-    └── calibration_runtime.json
-```
-
-Raw hourly EnergyPlus outputs are summarized during execution and are not retained by default. If execution is interrupted, rerun the same command with `--resume` to continue from the successfully completed calibration points.
-
-4. Run the Synthetic Homes pipeline normally, following the instructions in the Synthetic Homes repository, to produce the target Synthetic Homes dataset used for evaluation.
-
-5. Run the $k$-sensitivity analysis. If the generated Synthetic Homes dataset has been copied to `synthetic_homes/k_sensitivity/dataset/`, the default invocation is:
-
-```zsh
-python3 synthetic_homes/k_sensitivity/test_k_sensitivity.py
-```
-
-Alternatively, the dataset may remain in the Synthetic Homes repository and be supplied explicitly:
-
-```zsh
+```bash
 python3 synthetic_homes/k_sensitivity/test_k_sensitivity.py \
     --calibration-dir synthetic_homes/k_sensitivity/calibration_grid \
     --dataset-dir ../synthetic-homes/path/to/dataset \
     --output-dir synthetic_homes/k_sensitivity/k_sensitivity_results
 ```
 
-The analysis evaluates $k \in \{2,3,5,7,9,11,13,15\}$, using $k=15$ as the high-resolution reference. It reports rank stability, absolute changes in the resulting supervision signal, top-ranked-set overlap, and computational cost across calibration resolutions.
+The analysis evaluates
 
-### Validations in Other Domains (Sec. 4.2)
+\[
+k \in \{2,3,5,7,9,11,13,15\},
+\]
 
-Evaluates the generality of the proposed framework on labeled benchmark datasets outside the residential retrofit domain. The calibration-first supervision signal is constructed without observing ground-truth labels; labels are used only afterward for external validation.
+using \(k=15\) as the high-resolution reference.
 
-The experiments include Ames Housing and Breast Cancer Wisconsin. Across these datasets, calibrated fusion is compared with naïve averaging and individual subset-specific scorers using task-appropriate external validation metrics.
+## Cross-Domain Validation
 
-### Psychometric Evaluations (App. B)
+The framework is additionally evaluated on three labeled benchmark datasets:
 
-Evaluates the proposed framework on psychometric datasets in which multiple observed subscales serve as heterogeneous evidence sources for an underlying latent construct.
+- **Ames Housing** — regression, evaluated primarily using Spearman rank correlation;
+- **Breast Cancer Wisconsin** — classification, evaluated primarily using AUROC; and
+- **Wine Quality** — regression, evaluated primarily using Spearman rank correlation.
 
-Experiments include:
+Ground-truth outcomes are **not used to construct the supervision signal**. They are used only afterward to evaluate the resulting signal.
 
-- **BIG5:** Five personality domain scores (Extraversion, Neuroticism, Agreeableness, Conscientiousness, and Openness) are treated as subset-specific scorers and fused into a single supervision signal. The resulting ranking is compared against the first principal component computed from all 50 questionnaire items.
+The calibrated fusion method is compared against uncalibrated averaging and sample-dependent unsupervised baselines.
 
-- **HEXACO:** Six personality domain scores (Honesty–Humility, Emotionality, Extraversion, Agreeableness, Conscientiousness, and Openness) are treated as subset-specific scorers and fused. The resulting ranking is evaluated against the first principal component of the complete 240-item inventory.
+### Run the Benchmark Experiments
 
-- **MGKT:** Five domain-level scores from the Multifactor General Knowledge Test are treated as subset-specific scorers and fused into a single supervision signal. The resulting ranking is compared against the first principal component computed from all 32 question-level scores.
+From the repository root:
 
-For each dataset, calibrated fusion is compared with naïve averaging, the aggregate domain score, and individual subset-specific scorers. Agreement with the item-level latent reference is evaluated using Spearman rank correlation, Kendall rank correlation, and top-10% overlap.
+```bash
+python3 other_domain_validation/validations.py \
+    --k 5 \
+    --output-dir other_domain_validation/results/cross_domain_validation
+```
 
-Collectively, these experiments examine whether calibration-first supervision recovers latent structure identified from substantially finer-grained item-level information without using that item-level reference during supervision construction.
+This produces per-dataset observation files, calibration references, calibration statistics, and summary metrics.
+
+### Run the Statistical Analysis
+
+The paired bootstrap analysis reported in the paper can then be reproduced with:
+
+```bash
+python3 other_domain_validation/statistics.py \
+    --input-dir other_domain_validation/results/cross_domain_validation \
+    --output-dir other_domain_validation/statistical_analysis \
+    --bootstrap 50000 \
+    --seed 20260922
+```
+
+All method comparisons use paired bootstrap resampling so that each method is evaluated on the same resampled observations within each replicate. Primary comparisons are adjusted across the three benchmark datasets using Bonferroni correction.
+
+Machine-readable results are written to `other_domain_validation/statistical_analysis/`.
+
+## Data
+
+The cross-domain datasets are obtained from OpenML, scikit-learn, or the UCI Machine Learning Repository at runtime. Dataset sources and licenses are documented in [`dataset_licenses.md`](dataset_licenses.md).
+
+The Synthetic Homes calibration-resolution experiment relies on the companion Synthetic Homes pipeline for building simulation and dataset generation.
+
+## Reproducibility
+
+The repository includes the random seeds, calibration resolutions, scorer definitions, and statistical-analysis settings used for the reported experiments. Precomputed experimental outputs are also included where practical to permit inspection of the reported results without rerunning computationally expensive simulations.
