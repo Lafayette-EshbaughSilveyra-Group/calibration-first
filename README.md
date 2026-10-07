@@ -1,6 +1,6 @@
-# Align Before You Combine: A Calibration-First Framework for Supervision Without Ground Truth
+# Align Before You Combine: Reference Space Calibration for Supervision Without Ground Truth
 
-This repository contains the reference implementation and experimental code for *Align Before You Combine: A Calibration-First Framework for Supervision Without Ground Truth*.
+This repository contains the reference implementation and experimental code for *Align Before You Combine: Reference Space Calibration for Supervision Without Ground Truth*.
 
 ## Overview
 
