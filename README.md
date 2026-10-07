@@ -69,7 +69,7 @@ The shared calibration space is formed from four ordered building characteristic
 3. roof R-value; and
 4. wall R-value.
 
-At the default resolution of five levels per feature, this produces a \(5^4 = 625\)-point synthetic ordinal reference space.
+At the default resolution of five levels per feature, this produces a $5^4 = 625$-point synthetic ordinal reference space.
 
 ### Constructing the Calibration Space
 
@@ -109,19 +109,19 @@ The demo scorer is provided only for testing the pipeline and does not reproduce
 
 ## Calibration-Resolution Sensitivity
 
-The paper also evaluates sensitivity to the resolution \(k\) of the synthetic calibration space.
+The paper also evaluates sensitivity to the resolution $k$ of the synthetic calibration space.
 
-The high-resolution Synthetic Homes experiment uses a \(k=15\) master grid, corresponding to
+The high-resolution Synthetic Homes experiment uses a $k=15$ master grid, corresponding to
 
-\[
+$$
 15^4 = 50{,}625
-\]
+$$
 
 calibration points. Lower-resolution spaces are obtained by selecting approximately evenly spaced levels from this master grid.
 
 This experiment requires the companion Synthetic Homes repository and EnergyPlus.
 
-From the repository root, generate the \(k=15\) master grid with:
+From the repository root, generate the $k=15$ master grid with:
 
 ```bash
 python3 synthetic_homes/k_sensitivity/generate_calibration_grid.py \
@@ -145,9 +145,9 @@ python3 synthetic_homes/k_sensitivity/test_k_sensitivity.py \
 
 The analysis evaluates
 
-\[
+$$
 k \in \{2,3,5,7,9,11,13,15\},
-\]
+$$
 
 using \(k=15\) as the high-resolution reference.
 
