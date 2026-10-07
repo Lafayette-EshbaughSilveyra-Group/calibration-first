@@ -149,7 +149,7 @@ $$
 k \in \{2,3,5,7,9,11,13,15\},
 $$
 
-using \(k=15\) as the high-resolution reference.
+using $k=15$ as the high-resolution reference.
 
 ## Cross-Domain Validation
 
