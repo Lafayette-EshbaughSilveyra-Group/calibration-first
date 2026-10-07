@@ -24,12 +24,16 @@ The framework is scorer-agnostic: scorers may be heuristic, simulation-based, st
 │   ├── statistics.py
 │   ├── results/
 │   └── statistical_analysis/
+├── irt_testing/
+│   ├── calibration_space_and_irt.py
+│   ├── data/
+│   └── irt_exp_results.md
 ├── dataset_licenses.md
 ├── requirements.txt
 └── README.md
 ```
 
-`synthetic_homes/` contains the residential energy-retrofit case study and calibration-resolution analysis. `other_domain_validation/` contains the cross-domain benchmark experiments and paired bootstrap analysis reported in the paper.
+`synthetic_homes/` contains the residential energy-retrofit case study and calibration-resolution analysis. `other_domain_validation/` contains the cross-domain benchmark experiments and paired bootstrap analysis reported in the main paper. `irt_testing/` contains the psychometric validation experiments reported in the appendix.
 
 ## Setup
 
@@ -77,7 +81,7 @@ python3 synthetic_homes/build_calibration_space.py
 
 ### Synthetic Homes Data
 
-The residential case study and calibration-resolution experiments use the Synthetic Homes pipeline described in the accompanying work. The dataset is generated externally using the Synthetic Homes repository ([Lafayette-EshbaughSilveyra-Group](https://github.com/Lafayette-EshbaughSilveyra-Group/synthetic-homes)) and is not included in this repository.
+The residential case study and calibration-resolution experiments use the Synthetic Homes pipeline described in the accompanying work. The dataset is generated externally using the [Synthetic Homes repository](https://github.com/Lafayette-EshbaughSilveyra-Group/synthetic-homes) and is not included in this repository.
 
 Follow the Synthetic Homes repository instructions to generate the residential dataset and EnergyPlus outputs, then provide the resulting dataset directory to the scripts in this repository using the `--dataset-dir` argument.
 
@@ -187,12 +191,47 @@ All method comparisons use paired bootstrap resampling so that each method is ev
 
 Machine-readable results are written to `other_domain_validation/statistical_analysis/`.
 
+## Psychometric Validation
+
+The appendix evaluates the framework in a psychometric setting using the experiments in `irt_testing/`.
+
+The primary experiment script is:
+
+```text
+irt_testing/calibration_space_and_irt.py
+```
+
+and the corresponding experimental results are documented in:
+
+```text
+irt_testing/irt_exp_results.md
+```
+
+The datasets used by these experiments are stored under `irt_testing/data/`.
+
+To run the psychometric validation from the repository root:
+
+```bash
+python3 irt_testing/calibration_space_and_irt.py
+```
+
+These experiments provide an additional evaluation of calibration-first fusion outside the main cross-domain benchmark suite and are reported in the appendix rather than the primary experimental results.
+
 ## Data
 
 The cross-domain datasets are obtained from OpenML, scikit-learn, or the UCI Machine Learning Repository at runtime. Dataset sources and licenses are documented in [`dataset_licenses.md`](dataset_licenses.md).
 
 The Synthetic Homes calibration-resolution experiment relies on the companion Synthetic Homes pipeline for building simulation and dataset generation.
 
+Psychometric-validation data used for the appendix experiments are contained under `irt_testing/data/`.
+
 ## Reproducibility
 
-The repository includes the random seeds, calibration resolutions, scorer definitions, and statistical-analysis settings used for the reported experiments. Precomputed experimental outputs are also included where practical to permit inspection of the reported results without rerunning computationally expensive simulations.
+The repository includes the random seeds, calibration resolutions, scorer definitions, statistical-analysis settings, and precomputed outputs used for the reported experiments where practical. These artifacts permit inspection of the reported results without rerunning computationally expensive simulations or bootstrap analyses.
+
+The principal reproduction paths are:
+
+- `synthetic_homes/` for the residential energy-retrofit case study;
+- `synthetic_homes/k_sensitivity/` for calibration-resolution sensitivity;
+- `other_domain_validation/` for the three cross-domain benchmark experiments and paired statistical analysis; and
+- `irt_testing/` for the psychometric validation reported in the appendix.
